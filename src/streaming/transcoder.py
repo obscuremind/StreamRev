@@ -4,6 +4,7 @@ FFmpeg transcoding wrapper
 
 import subprocess
 import logging
+import json
 from typing import Optional, Dict, Any, List
 import os
 
@@ -138,7 +139,6 @@ class FFmpegTranscoder:
             )
             
             if result.returncode == 0:
-                import json
                 return json.loads(result.stdout)
             
             return None
