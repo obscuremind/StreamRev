@@ -8,6 +8,7 @@ import logging
 import os
 from .auth import authenticate_user, token_required
 from .routes import register_routes
+from ..utils.config import load_config
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -25,9 +26,12 @@ def create_app(config: Dict[str, Any] = None) -> Flask:
     """
     app = Flask(__name__)
     
+    # Load configuration from environment/file
+    app_config = load_config()
+    
     # Default configuration
     app.config.update({
-        'SECRET_KEY': os.getenv('SECRET_KEY', 'INSECURE-DEFAULT-CHANGE-THIS'),
+        'SECRET_KEY': app_config.get('secret_key'),
         'JSON_SORT_KEYS': False,
         'JSONIFY_PRETTYPRINT_REGULAR': False
     })
@@ -35,6 +39,11 @@ def create_app(config: Dict[str, Any] = None) -> Flask:
     # Update with provided config
     if config:
         app.config.update(config)
+    
+    # Validate that SECRET_KEY is set
+    if not app.config.get('SECRET_KEY'):
+        logger.error("SECRET_KEY not configured! This is a critical security issue.")
+        raise ValueError("SECRET_KEY must be configured")
     
     # Error handlers
     @app.errorhandler(404)

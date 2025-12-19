@@ -12,8 +12,18 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-# Secret key for JWT (loaded from config/environment)
-SECRET_KEY = os.getenv('SECRET_KEY', 'INSECURE-DEFAULT-CHANGE-THIS')
+
+def get_secret_key() -> str:
+    """Get JWT secret key from app config or environment"""
+    try:
+        return current_app.config.get('SECRET_KEY')
+    except RuntimeError:
+        # Outside application context
+        secret = os.getenv('SECRET_KEY')
+        if not secret:
+            logger.error("SECRET_KEY not configured! This is a critical security issue.")
+            raise ValueError("SECRET_KEY must be configured in environment or config")
+        return secret
 
 
 def generate_token(user_id: int, username: str, is_admin: bool = False) -> str:
@@ -28,8 +38,7 @@ def generate_token(user_id: int, username: str, is_admin: bool = False) -> str:
     Returns:
         JWT token string
     """
-    # Get secret key from app config or environment
-    secret = current_app.config.get('SECRET_KEY', SECRET_KEY)
+    secret = get_secret_key()
     
     payload = {
         'user_id': user_id,
@@ -53,8 +62,7 @@ def verify_token(token: str) -> Optional[Dict[str, Any]]:
         Decoded payload or None if invalid
     """
     try:
-        # Get secret key from app config or environment
-        secret = current_app.config.get('SECRET_KEY', SECRET_KEY)
+        secret = get_secret_key()
         payload = jwt.decode(token, secret, algorithms=['HS256'])
         return payload
     except jwt.ExpiredSignatureError:

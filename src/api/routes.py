@@ -1,5 +1,13 @@
 """
 API routes for StreamRev - Xtream Codes compatible
+
+Note: This module provides the API endpoint structure and authentication framework.
+The TODO comments indicate where database integration should be added for production use.
+To complete the implementation:
+1. Import database models (User, Stream, VOD, Series, etc.)
+2. Replace TODO sections with actual database queries
+3. Add proper error handling for database operations
+4. Implement data validation and sanitization
 """
 
 from flask import Flask, request, jsonify, Response

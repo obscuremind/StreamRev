@@ -4,10 +4,16 @@ Configuration management
 
 import os
 import json
+import secrets
 from typing import Dict, Any, Optional
 import logging
 
 logger = logging.getLogger(__name__)
+
+
+def generate_secret_key() -> str:
+    """Generate a cryptographically secure secret key"""
+    return secrets.token_urlsafe(32)
 
 
 def load_config(config_path: Optional[str] = None) -> Dict[str, Any]:
@@ -20,6 +26,13 @@ def load_config(config_path: Optional[str] = None) -> Dict[str, Any]:
     Returns:
         Configuration dictionary
     """
+    # Generate secret key if not provided
+    secret_key = os.getenv('SECRET_KEY')
+    if not secret_key:
+        logger.warning("SECRET_KEY not set in environment. Generating random key for this session.")
+        logger.warning("⚠️  Set SECRET_KEY environment variable for production use!")
+        secret_key = generate_secret_key()
+    
     config = {
         # Database
         'db_host': os.getenv('DB_HOST', '127.0.0.1'),
@@ -36,7 +49,7 @@ def load_config(config_path: Optional[str] = None) -> Dict[str, Any]:
         # API
         'api_host': os.getenv('API_HOST', '0.0.0.0'),
         'api_port': int(os.getenv('API_PORT', 5000)),
-        'secret_key': os.getenv('SECRET_KEY', 'change-this-secret-key'),
+        'secret_key': secret_key,
         
         # FFmpeg
         'ffmpeg_path': os.getenv('FFMPEG_PATH', '/usr/bin/ffmpeg'),
