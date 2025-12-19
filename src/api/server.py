@@ -9,6 +9,7 @@ import os
 from .auth import authenticate_user, token_required
 from .routes import register_routes
 from ..utils.config import load_config
+from ..web.routes import register_web_routes
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -66,6 +67,9 @@ def create_app(config: Dict[str, Any] = None) -> Flask:
     
     # Register API routes
     register_routes(app)
+    
+    # Register web interface routes
+    register_web_routes(app)
     
     logger.info("Flask application created successfully")
     return app

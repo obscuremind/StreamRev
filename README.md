@@ -50,6 +50,21 @@ chmod +x install
 sudo ./install
 ```
 
+### Docker Installation
+
+```bash
+# Clone repository
+git clone https://github.com/obscuremind/StreamRev.git
+cd StreamRev
+
+# Configure environment
+cp .env.example .env
+# Edit .env with your settings
+
+# Start with Docker Compose
+docker-compose up -d
+```
+
 ### Manual Installation
 
 See [docs/INSTALLATION.md](docs/INSTALLATION.md) for detailed installation instructions.
@@ -57,9 +72,11 @@ See [docs/INSTALLATION.md](docs/INSTALLATION.md) for detailed installation instr
 ## 📚 Documentation
 
 - [Installation Guide](docs/INSTALLATION.md)
+- [Docker Deployment](docs/DOCKER.md)
 - [API Documentation](docs/API.md)
 - [User Guide](docs/USER_GUIDE.md)
 - [Configuration Guide](docs/CONFIGURATION.md)
+- [Scripts Documentation](scripts/README.md)
 
 ## 🏗️ Architecture
 
@@ -71,11 +88,25 @@ StreamRev is built with a modular architecture:
 │   ├── core/         # Core business logic
 │   ├── database/     # Database models and migrations
 │   ├── streaming/    # Streaming and transcoding
+│   ├── web/          # Web admin interface
 │   └── utils/        # Utility functions
 ├── configs/          # Configuration templates
 ├── docs/             # Documentation
-└── scripts/          # Installation and maintenance scripts
+├── scripts/          # Maintenance scripts (backup, restore, monitor, update)
+└── tests/            # Unit and integration tests
 ```
+
+## 🎨 Web Interface
+
+StreamRev includes a basic web admin interface accessible at `http://your-server/`:
+
+- Dashboard with system overview
+- User management
+- Stream management
+- VOD and series management
+- Settings configuration
+
+For full functionality, use the REST API endpoints.
 
 ## 🤝 Contributing
 

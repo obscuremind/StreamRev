@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>StreamRev - IPTV Admin Panel</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>StreamRev</h1>
+            <p>IPTV Backend Management Panel</p>
+        </header>
+        
+        <nav>
+            <ul>
+                <li><a href="/dashboard">Dashboard</a></li>
+                <li><a href="/users">Users</a></li>
+                <li><a href="/streams">Live Streams</a></li>
+                <li><a href="/vod">VOD</a></li>
+                <li><a href="/series">Series</a></li>
+                <li><a href="/settings">Settings</a></li>
+            </ul>
+        </nav>
+        
+        <main>
+            <div class="welcome">
+                <h2>Welcome to StreamRev</h2>
+                <p>Your open-source IPTV backend management platform.</p>
+                
+                <div class="info-box">
+                    <h3>Getting Started</h3>
+                    <p>This is a basic web interface for StreamRev. For full functionality, use the API endpoints.</p>
+                    <ul>
+                        <li>API Documentation: <a href="/docs/API.md">View Docs</a></li>
+                        <li>API Health: <a href="/health">Health Check</a></li>
+                        <li>API Base URL: <code>http://your-server:5000/api/v1/</code></li>
+                    </ul>
+                </div>
+                
+                <div class="info-box">
+                    <h3>Quick Links</h3>
+                    <ul>
+                        <li><a href="https://github.com/obscuremind/StreamRev">GitHub Repository</a></li>
+                        <li><a href="/docs/INSTALLATION.md">Installation Guide</a></li>
+                        <li><a href="/docs/USER_GUIDE.md">User Guide</a></li>
+                    </ul>
+                </div>
+            </div>
+        </main>
+        
+        <footer>
+            <p>&copy; 2024 StreamRev - Open Source IPTV Platform</p>
+        </footer>
+    </div>
+    
+    <script src="/static/js/app.js"></script>
+</body>
+</html>
