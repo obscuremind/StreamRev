@@ -4,15 +4,16 @@ Authentication and authorization module
 
 import jwt
 import datetime
+import os
 from functools import wraps
-from flask import request, jsonify
+from flask import request, jsonify, current_app
 from typing import Optional, Dict, Any, Callable
 import logging
 
 logger = logging.getLogger(__name__)
 
-# Secret key for JWT (should be loaded from config)
-SECRET_KEY = "your-secret-key-change-this"
+# Secret key for JWT (loaded from config/environment)
+SECRET_KEY = os.getenv('SECRET_KEY', 'INSECURE-DEFAULT-CHANGE-THIS')
 
 
 def generate_token(user_id: int, username: str, is_admin: bool = False) -> str:
@@ -27,6 +28,9 @@ def generate_token(user_id: int, username: str, is_admin: bool = False) -> str:
     Returns:
         JWT token string
     """
+    # Get secret key from app config or environment
+    secret = current_app.config.get('SECRET_KEY', SECRET_KEY)
+    
     payload = {
         'user_id': user_id,
         'username': username,
@@ -35,7 +39,7 @@ def generate_token(user_id: int, username: str, is_admin: bool = False) -> str:
         'iat': datetime.datetime.utcnow()
     }
     
-    return jwt.encode(payload, SECRET_KEY, algorithm='HS256')
+    return jwt.encode(payload, secret, algorithm='HS256')
 
 
 def verify_token(token: str) -> Optional[Dict[str, Any]]:
@@ -49,7 +53,9 @@ def verify_token(token: str) -> Optional[Dict[str, Any]]:
         Decoded payload or None if invalid
     """
     try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=['HS256'])
+        # Get secret key from app config or environment
+        secret = current_app.config.get('SECRET_KEY', SECRET_KEY)
+        payload = jwt.decode(token, secret, algorithms=['HS256'])
         return payload
     except jwt.ExpiredSignatureError:
         logger.warning("Token expired")

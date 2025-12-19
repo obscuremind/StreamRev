@@ -5,6 +5,7 @@ Main API server using Flask
 from flask import Flask, jsonify, request
 from typing import Dict, Any
 import logging
+import os
 from .auth import authenticate_user, token_required
 from .routes import register_routes
 
@@ -26,7 +27,7 @@ def create_app(config: Dict[str, Any] = None) -> Flask:
     
     # Default configuration
     app.config.update({
-        'SECRET_KEY': 'your-secret-key-change-this',
+        'SECRET_KEY': os.getenv('SECRET_KEY', 'INSECURE-DEFAULT-CHANGE-THIS'),
         'JSON_SORT_KEYS': False,
         'JSONIFY_PRETTYPRINT_REGULAR': False
     })

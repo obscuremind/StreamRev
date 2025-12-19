@@ -4,7 +4,7 @@ Database models for StreamRev
 
 from typing import Optional, Dict, Any, List
 from datetime import datetime
-import hashlib
+import bcrypt
 
 
 class BaseModel:
@@ -85,13 +85,14 @@ class User(BaseModel):
     
     @staticmethod
     def _hash_password(password: str) -> str:
-        """Hash password using SHA256"""
-        return hashlib.sha256(password.encode()).hexdigest()
+        """Hash password using bcrypt"""
+        salt = bcrypt.gensalt()
+        return bcrypt.hashpw(password.encode('utf-8'), salt).decode('utf-8')
     
     @staticmethod
     def _verify_password(password: str, hashed: str) -> bool:
-        """Verify password against hash"""
-        return hashlib.sha256(password.encode()).hexdigest() == hashed
+        """Verify password against hash using constant-time comparison"""
+        return bcrypt.checkpw(password.encode('utf-8'), hashed.encode('utf-8'))
 
 
 class Reseller(BaseModel):

@@ -41,7 +41,7 @@ class FFmpegTranscoder:
             logger.error(f"FFmpeg verification failed: {str(e)}")
     
     def transcode_stream(self, input_url: str, output_url: str, 
-                        profile: Optional[str] = None) -> bool:
+                        profile: Optional[str] = None) -> Optional[subprocess.Popen]:
         """
         Transcode stream using FFmpeg
         
@@ -51,7 +51,7 @@ class FFmpegTranscoder:
             profile: Transcoding profile name
             
         Returns:
-            bool: True if successful, False otherwise
+            subprocess.Popen: FFmpeg process object or None if failed
         """
         try:
             # Build FFmpeg command
@@ -67,12 +67,16 @@ class FFmpegTranscoder:
                 universal_newlines=True
             )
             
-            # TODO: Monitor process and handle errors
-            return True
+            # Check if process started successfully
+            if process.poll() is None or process.returncode == 0:
+                return process
+            else:
+                logger.error(f"FFmpeg process failed to start")
+                return None
             
         except Exception as e:
             logger.error(f"Transcoding failed: {str(e)}")
-            return False
+            return None
     
     def _build_transcode_command(self, input_url: str, output_url: str,
                                  profile: Optional[str] = None) -> List[str]:

@@ -210,10 +210,8 @@ CREATE TABLE IF NOT EXISTS `settings` (
   KEY `key_idx` (`key`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- Insert default admin user (password: admin123 - CHANGE THIS!)
-INSERT INTO `users` (`username`, `password`, `email`, `status`, `admin_enabled`, `max_connections`) 
-VALUES ('admin', '$2y$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi', 'admin@streamrev.local', 1, 1, 10)
-ON DUPLICATE KEY UPDATE username=username;
+-- Note: Default admin user will be created during installation with a randomly generated password
+-- The installation script will provide you with the credentials
 
 -- Insert default settings
 INSERT INTO `settings` (`key`, `value`, `type`, `description`) VALUES

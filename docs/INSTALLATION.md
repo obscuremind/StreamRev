@@ -210,13 +210,20 @@ You should receive a response like:
 
 ## Post-Installation
 
-### 1. Change Default Password
+### 1. Note Your Admin Password
 
-The default admin credentials are:
-- Username: `admin`
-- Password: `admin123`
+The installation script creates a random secure password for the admin account.
+The credentials are displayed at the end of installation and saved to `/root/.streamrev_admin_password`.
 
-**⚠️ CHANGE THIS IMMEDIATELY!**
+**⚠️ SAVE YOUR PASSWORD SECURELY AND DELETE THE FILE!**
+
+```bash
+# View your admin password
+sudo cat /root/.streamrev_admin_password
+
+# After saving it securely, delete the file
+sudo rm /root/.streamrev_admin_password
+```
 
 ### 2. Configure Domain
 

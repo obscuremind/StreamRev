@@ -23,10 +23,13 @@ After installation, access StreamRev through:
 
 ### Default Credentials
 
-**⚠️ Security Warning**: Change these immediately after first login!
+The admin credentials are generated during installation with a secure random password.
+Check the installation output or the file `/root/.streamrev_admin_password` for your password.
 
 - Username: `admin`
-- Password: `admin123`
+- Password: (see installation output or `/root/.streamrev_admin_password`)
+
+**⚠️ Security Warning**: Save your password securely and delete the password file!
 
 ### First Login
 

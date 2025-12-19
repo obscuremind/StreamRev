@@ -186,6 +186,21 @@ setup_database_schema() {
     if [ -f "${INSTALL_DIR}/src/database/schema.sql" ]; then
         mysql -u${DB_USER} -p${DB_PASSWORD} ${DB_NAME} < ${INSTALL_DIR}/src/database/schema.sql
         print_info "Database schema created successfully"
+        
+        # Create default admin user with secure random password
+        ADMIN_PASSWORD=$(generate_password)
+        ADMIN_HASH=$(python3 -c "import bcrypt; print(bcrypt.hashpw('${ADMIN_PASSWORD}'.encode('utf-8'), bcrypt.gensalt()).decode('utf-8'))")
+        
+        mysql -u${DB_USER} -p${DB_PASSWORD} ${DB_NAME} <<EOF
+INSERT INTO users (username, password, email, status, admin_enabled, max_connections) 
+VALUES ('admin', '${ADMIN_HASH}', 'admin@streamrev.local', 1, 1, 10)
+ON DUPLICATE KEY UPDATE username=username;
+EOF
+        
+        print_info "Admin user created"
+        print_info "Admin password: ${ADMIN_PASSWORD}"
+        echo "${ADMIN_PASSWORD}" > /root/.streamrev_admin_password
+        chmod 600 /root/.streamrev_admin_password
     else
         print_warn "Database schema file not found"
     fi
@@ -273,10 +288,13 @@ show_summary() {
     print_info "  Username: ${DB_USER}"
     print_info "  Password: ${DB_PASSWORD}"
     print_info ""
-    print_info "Default Admin Credentials:"
+    print_info "Admin Credentials:"
     print_info "  Username: admin"
-    print_info "  Password: admin123"
-    print_info "  ⚠️  CHANGE THIS PASSWORD IMMEDIATELY!"
+    if [ -f /root/.streamrev_admin_password ]; then
+        print_info "  Password: $(cat /root/.streamrev_admin_password)"
+        print_info "  ⚠️  Password saved to: /root/.streamrev_admin_password"
+        print_info "  ⚠️  SAVE THIS PASSWORD SECURELY AND DELETE THE FILE!"
+    fi
     print_info ""
     print_info "Installation Directory: ${INSTALL_DIR}"
     print_info "Configuration File: ${INSTALL_DIR}/config.json"
