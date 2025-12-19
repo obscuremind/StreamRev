@@ -1,0 +1,36 @@
+# StreamRev Python Dependencies
+
+# Web Framework
+Flask==3.0.0
+Werkzeug==3.0.1
+
+# Database
+PyMySQL==1.1.0
+SQLAlchemy==2.0.23
+
+# Authentication
+PyJWT==2.8.0
+bcrypt==4.1.2
+
+# Caching
+redis==5.0.1
+
+# HTTP
+requests==2.31.0
+urllib3==2.1.0
+
+# Utilities
+python-dotenv==1.0.0
+pyyaml==6.0.1
+
+# Date/Time
+python-dateutil==2.8.2
+
+# Logging
+colorlog==6.8.0
+
+# Development
+pytest==7.4.3
+pytest-cov==4.1.0
+black==23.12.1
+flake8==7.0.0

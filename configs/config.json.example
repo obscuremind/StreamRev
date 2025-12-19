@@ -1,0 +1,62 @@
+{
+  "database": {
+    "host": "127.0.0.1",
+    "port": 3306,
+    "user": "streamrev",
+    "password": "your-secure-password",
+    "name": "streamrev"
+  },
+  "redis": {
+    "host": "127.0.0.1",
+    "port": 6379,
+    "password": null,
+    "db": 0
+  },
+  "api": {
+    "host": "0.0.0.0",
+    "port": 5000,
+    "secret_key": "generate-a-secure-random-key-here",
+    "debug": false
+  },
+  "streaming": {
+    "ffmpeg_path": "/usr/bin/ffmpeg",
+    "base_url": "http://your-domain.com",
+    "max_connections_per_user": 1,
+    "transcode_profiles": {
+      "low": {
+        "video_bitrate": "800k",
+        "audio_bitrate": "64k",
+        "preset": "veryfast"
+      },
+      "medium": {
+        "video_bitrate": "2000k",
+        "audio_bitrate": "128k",
+        "preset": "veryfast"
+      },
+      "high": {
+        "video_bitrate": "4000k",
+        "audio_bitrate": "192k",
+        "preset": "medium"
+      }
+    }
+  },
+  "paths": {
+    "streams": "/var/streams",
+    "live": "/var/streams/live",
+    "vod": "/var/streams/vod",
+    "logs": "/var/log/streamrev"
+  },
+  "security": {
+    "allowed_ips": [],
+    "rate_limit": {
+      "enabled": true,
+      "requests_per_minute": 60
+    }
+  },
+  "logging": {
+    "level": "INFO",
+    "file": "/var/log/streamrev/app.log",
+    "max_size": "100MB",
+    "backup_count": 5
+  }
+}
