@@ -249,6 +249,9 @@ class User(Base):
     allowed_output_ids: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     is_stalker: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     is_mag: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    created_by_reseller_id: Mapped[Optional[int]] = mapped_column(
+        Integer, ForeignKey("resellers.id", ondelete="SET NULL"), nullable=True
+    )
 
     force_server: Mapped[Optional["Server"]] = relationship(
         "Server",
