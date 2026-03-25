@@ -33,7 +33,12 @@ async def live_stream(username: str, password: str, stream_id_ext: str,
     if not auth.check_ip_allowed(user, client_ip):
         raise HTTPException(status_code=403, detail="IP not allowed")
 
-    ok, stream, err = auth.authorize_stream(user, stream_id)
+    ok, stream, err = auth.authorize_stream(
+        user,
+        stream_id,
+        user_agent=request.headers.get("user-agent"),
+        client_ip=client_ip,
+    )
     if not ok:
         raise HTTPException(status_code=403, detail=err)
 
