@@ -22,6 +22,9 @@ class UserCreate(BaseModel):
     bouquet: Optional[str] = None
     allowed_output_ids: Optional[str] = None
     allowed_ips: Optional[str] = None
+    allowed_user_agents: Optional[str] = None
+    force_server_id: Optional[int] = None
+    reseller_notes: Optional[str] = None
     is_restreamer: bool = False
     is_mag: bool = False
     is_stalker: bool = False
@@ -37,7 +40,13 @@ class UserUpdate(BaseModel):
     admin_notes: Optional[str] = None
     bouquet: Optional[str] = None
     allowed_output_ids: Optional[str] = None
+    allowed_ips: Optional[str] = None
+    allowed_user_agents: Optional[str] = None
+    force_server_id: Optional[int] = None
+    reseller_notes: Optional[str] = None
     is_restreamer: Optional[bool] = None
+    is_mag: Optional[bool] = None
+    is_stalker: Optional[bool] = None
 
 
 class BatchAction(BaseModel):
@@ -132,6 +141,12 @@ def _user_to_dict(u) -> dict:
         "exp_date": str(u.exp_date) if u.exp_date else None,
         "is_trial": u.is_trial, "enabled": u.enabled,
         "admin_notes": u.admin_notes, "bouquet": u.bouquet,
+        "allowed_ips": u.allowed_ips,
+        "allowed_user_agents": u.allowed_user_agents,
+        "allowed_output_ids": u.allowed_output_ids,
+        "force_server_id": u.force_server_id,
+        "reseller_notes": u.reseller_notes,
+        "is_admin": u.is_admin,
         "is_restreamer": u.is_restreamer, "is_mag": u.is_mag,
         "is_stalker": u.is_stalker, "created_at": str(u.created_at) if u.created_at else None,
     }
