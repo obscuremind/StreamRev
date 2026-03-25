@@ -13,17 +13,34 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from sqlalchemy.orm import Session
 from typing import Optional
 from datetime import datetime, timezone, timedelta
+import base64
 import json
 from src.core.database import get_db
 from src.core.config import settings
+from src.core.auth.password import verify_password
+from src.core.util.encryption import base64_decode
 from src.domain.user.service import UserService
 from src.domain.stream.service import StreamService
 from src.domain.vod.service import MovieService, SeriesService
 from src.domain.category.service import CategoryService
 from src.domain.epg.service import EpgService
 from src.domain.models import User
+from src.domain.security.blocklist_service import BlocklistService, BruteforceGuard
 
 router = APIRouter(tags=["Player API"])
+
+ACTION_NUM_ALIASES = {
+    "200": "get_vod_categories",
+    "201": "get_live_categories",
+    "202": "get_live_streams",
+    "203": "get_vod_streams",
+    "204": "get_series_info",
+    "205": "get_short_epg",
+    "206": "get_series_categories",
+    "207": "get_simple_data_table",
+    "208": "get_series",
+    "209": "get_vod_info",
+}
 
 
 def _parse_epg_range_time(raw: Optional[str]) -> Optional[datetime]:
@@ -41,19 +58,139 @@ def _parse_epg_range_time(raw: Optional[str]) -> Optional[datetime]:
             return None
 
 
-def _authenticate_user(username: str, password: str, db: Session) -> User:
-    from src.core.auth.password import verify_password
-    user = db.query(User).filter(User.username == username).first()
-    if not user:
-        raise HTTPException(status_code=403, detail="Invalid credentials")
-    if not verify_password(password, user.password):
-        raise HTTPException(status_code=403, detail="Invalid credentials")
+def _client_ip(request: Request) -> str:
+    if request.client:
+        return request.client.host or ""
+    return ""
+
+
+def _dt_to_unix(dt: Optional[datetime]) -> int:
+    if not dt:
+        return 0
+    if dt.tzinfo is None:
+        return int(dt.replace(tzinfo=timezone.utc).timestamp())
+    return int(dt.timestamp())
+
+
+def _normalize_action(action: Optional[str]) -> Optional[str]:
+    if action is None:
+        return None
+    s = str(action).strip()
+    if s.isdigit():
+        return ACTION_NUM_ALIASES.get(s, s)
+    return s
+
+
+def _user_from_token(db: Session, token: str) -> Optional[User]:
+    user = db.query(User).filter(User.player_api_token == token).first()
+    if user:
+        return user
+    decoded = base64_decode(token)
+    if not decoded:
+        return None
+    for sep in (":", "|"):
+        if sep in decoded:
+            u, p = decoded.split(sep, 1)
+            u, p = u.strip(), p.strip()
+            if u and p:
+                cand = db.query(User).filter(User.username == u).first()
+                if cand and verify_password(p, cand.password):
+                    return cand
+    return None
+
+
+def _ensure_user_active(user: User, db: Session) -> None:
     if not user.enabled:
         raise HTTPException(status_code=403, detail="Account disabled")
     svc = UserService(db)
     if svc.is_expired(user):
         raise HTTPException(status_code=403, detail="Account expired")
+
+
+def _authenticate_user(
+    request: Request,
+    username: Optional[str],
+    password: Optional[str],
+    token: Optional[str],
+    db: Session,
+) -> User:
+    ip = _client_ip(request)
+    blocklist = BlocklistService(db)
+    if blocklist.is_ip_blocked(ip):
+        raise HTTPException(status_code=403, detail="Access denied")
+    guard = BruteforceGuard(db)
+    if guard.is_blocked(ip):
+        raise HTTPException(status_code=403, detail="Too many failed login attempts")
+
+    if token and str(token).strip():
+        user = _user_from_token(db, str(token).strip())
+        if user:
+            _ensure_user_active(user, db)
+            guard.record_attempt(ip, True)
+            return user
+        guard.record_attempt(ip, False)
+        raise HTTPException(status_code=403, detail="Invalid credentials")
+
+    if not username or not password:
+        raise HTTPException(status_code=403, detail="Invalid credentials")
+
+    user = db.query(User).filter(User.username == username).first()
+    if not user or not verify_password(password, user.password):
+        guard.record_attempt(ip, False)
+        raise HTTPException(status_code=403, detail="Invalid credentials")
+    if not user.enabled:
+        guard.record_attempt(ip, False)
+        raise HTTPException(status_code=403, detail="Account disabled")
+    svc = UserService(db)
+    if svc.is_expired(user):
+        guard.record_attempt(ip, False)
+        raise HTTPException(status_code=403, detail="Account expired")
+    guard.record_attempt(ip, True)
     return user
+
+
+def _parse_pagination(offset: Optional[str], items_per_page: Optional[str]) -> tuple[int, int]:
+    try:
+        off = max(0, int(offset)) if offset not in (None, "") else 0
+    except (ValueError, TypeError):
+        off = 0
+    try:
+        ipp = int(items_per_page) if items_per_page not in (None, "") else 10_000
+    except (ValueError, TypeError):
+        ipp = 10_000
+    ipp = max(1, min(ipp, 10_000))
+    return off, ipp
+
+
+def _epg_listing_full(p, stream, now_utc: datetime) -> dict:
+    start_ts = _dt_to_unix(p.start)
+    end_ts = _dt_to_unix(p.end)
+    now_playing = 0
+    if p.start and p.end and p.start <= now_utc <= p.end:
+        now_playing = 1
+    has_archive = 1 if (stream and getattr(stream, "tv_archive", False)) else 0
+    title = p.title or ""
+    desc = p.description or ""
+    return {
+        "id": str(p.id),
+        "epg_id": p.epg_id,
+        "title": base64.b64encode(title.encode("utf-8")).decode("ascii"),
+        "lang": p.lang or "en",
+        "start": p.start.strftime("%Y-%m-%d %H:%M:%S") if p.start else "",
+        "end": p.end.strftime("%Y-%m-%d %H:%M:%S") if p.end else "",
+        "description": base64.b64encode(desc.encode("utf-8")).decode("ascii"),
+        "channel_id": str(p.channel_id) if p.channel_id is not None else "",
+        "start_timestamp": start_ts,
+        "stop_timestamp": end_ts,
+        "now_playing": now_playing,
+        "has_archive": has_archive,
+    }
+
+
+def _epg_listing_short(p, stream, now_utc: datetime) -> dict:
+    row = _epg_listing_full(p, stream, now_utc)
+    row["end_timestamp"] = row["stop_timestamp"]
+    return row
 
 
 def _get_server_info(user: User) -> dict:
@@ -86,8 +223,12 @@ def _get_server_info(user: User) -> dict:
 
 
 @router.get("/player_api.php")
+@router.get("/panel_api/player_api.php")
 def player_api(
-    username: str = Query(...), password: str = Query(...),
+    request: Request,
+    username: Optional[str] = Query(None),
+    password: Optional[str] = Query(None),
+    token: Optional[str] = Query(None),
     action: Optional[str] = Query(None),
     category_id: Optional[str] = Query(None),
     stream_id: Optional[str] = Query(None),
@@ -96,9 +237,12 @@ def player_api(
     limit: Optional[str] = Query(None),
     start: Optional[str] = Query(None),
     end: Optional[str] = Query(None),
+    offset: Optional[str] = Query(None),
+    items_per_page: Optional[str] = Query(None),
     db: Session = Depends(get_db),
 ):
-    user = _authenticate_user(username, password, db)
+    user = _authenticate_user(request, username, password, token, db)
+    action = _normalize_action(action)
     if not action:
         return _get_server_info(user)
 
@@ -107,10 +251,19 @@ def player_api(
     movie_svc = MovieService(db)
     series_svc = SeriesService(db)
     epg_svc = EpgService(db)
+    off, ipp = _parse_pagination(offset, items_per_page)
 
     if action == "get_live_categories":
-        cats = cat_svc.get_live_categories()
-        return [{"category_id": str(c.id), "category_name": c.category_name, "parent_id": c.parent_id or 0} for c in cats]
+        live_cats = cat_svc.get_live_categories()
+        radio_cats = cat_svc.get_radio_categories()
+        seen: set[int] = set()
+        merged = []
+        for c in live_cats + radio_cats:
+            if c.id in seen:
+                continue
+            seen.add(c.id)
+            merged.append(c)
+        return [{"category_id": str(c.id), "category_name": c.category_name, "parent_id": c.parent_id or 0} for c in merged]
 
     elif action == "get_vod_categories":
         cats = cat_svc.get_movie_categories()
@@ -122,10 +275,11 @@ def player_api(
 
     elif action == "get_live_streams":
         cat_id = int(category_id) if category_id else None
-        streams = stream_svc.get_live_streams(category_id=cat_id)
+        streams_all = stream_svc.get_live_streams(category_id=cat_id)
+        streams = streams_all[off : off + ipp]
         return [
             {
-                "num": i + 1, "name": s.stream_display_name, "stream_type": "live",
+                "num": off + i + 1, "name": s.stream_display_name, "stream_type": "live",
                 "stream_id": s.id, "stream_icon": s.stream_icon or "",
                 "epg_channel_id": s.epg_channel_id or "", "added": str(int(s.added.timestamp())) if s.added else "0",
                 "category_id": str(s.category_id) if s.category_id else "0",
@@ -137,10 +291,11 @@ def player_api(
 
     elif action == "get_vod_streams":
         cat_id = int(category_id) if category_id else None
-        result = movie_svc.get_all(category_id=cat_id, per_page=500)
+        result = movie_svc.get_all(category_id=cat_id, per_page=500_000)
+        items = result["items"][off : off + ipp]
         return [
             {
-                "num": i + 1, "name": m.stream_display_name, "stream_type": "movie",
+                "num": off + i + 1, "name": m.stream_display_name, "stream_type": "movie",
                 "stream_id": m.id, "stream_icon": m.stream_icon or "",
                 "rating": str(m.rating or ""), "rating_5based": m.rating_5based or 0,
                 "added": str(int(m.added.timestamp())) if m.added else "0",
@@ -148,12 +303,13 @@ def player_api(
                 "container_extension": m.container_extension or "mp4",
                 "direct_source": "",
             }
-            for i, m in enumerate(result["items"])
+            for i, m in enumerate(items)
         ]
 
     elif action == "get_series":
         cat_id = int(category_id) if category_id else None
-        result = series_svc.get_all(category_id=cat_id, per_page=500)
+        result = series_svc.get_all(category_id=cat_id, per_page=500_000)
+        items = result["items"][off : off + ipp]
         return [
             {
                 "series_id": s.id, "name": s.title, "cover": s.cover or "",
@@ -165,7 +321,7 @@ def player_api(
                 "category_id": str(s.category_id) if s.category_id else "0",
                 "last_modified": str(int(s.last_modified.timestamp())) if s.last_modified else "0",
             }
-            for s in result["items"]
+            for s in items
         ]
 
     elif action == "get_series_info":
@@ -243,16 +399,10 @@ def player_api(
         if not stream or not stream.epg_channel_id:
             return {"epg_listings": []}
         programs = epg_svc.get_programs(stream.epg_channel_id, limit=10)
+        now_utc = datetime.utcnow()
         return {
             "epg_listings": [
-                {
-                    "id": str(p.id), "epg_id": p.epg_id, "title": p.title or "",
-                    "lang": p.lang or "en",
-                    "start": p.start.strftime("%Y-%m-%d %H:%M:%S") if p.start else "",
-                    "end": p.end.strftime("%Y-%m-%d %H:%M:%S") if p.end else "",
-                    "description": p.description or "",
-                    "channel_id": p.channel_id or "",
-                }
+                _epg_listing_short(p, stream, now_utc)
                 for p in programs
             ]
         }
@@ -273,24 +423,37 @@ def player_api(
             range_start=range_start,
             range_end=range_end,
         )
+        now_utc = datetime.utcnow()
         return {
             "epg_listings": [
-                {
-                    "id": str(p.id), "epg_id": p.epg_id, "title": p.title or "",
-                    "lang": p.lang or "en",
-                    "start": p.start.strftime("%Y-%m-%d %H:%M:%S") if p.start else "",
-                    "end": p.end.strftime("%Y-%m-%d %H:%M:%S") if p.end else "",
-                    "description": p.description or "",
-                    "channel_id": str(p.channel_id) if p.channel_id is not None else "",
-                }
+                _epg_listing_full(p, stream, now_utc)
                 for p in programs
             ]
         }
 
     elif action == "get_simple_data_table":
         streams = stream_svc.get_live_streams()
-        result = movie_svc.get_all(per_page=1000)
+        result = movie_svc.get_all(per_page=500_000)
         movies = result["items"]
+        if stream_id:
+            stream = stream_svc.get_by_id(int(stream_id))
+            if stream and stream.epg_channel_id:
+                now_utc = datetime.utcnow()
+                range_start = now_utc - timedelta(hours=6)
+                range_end = now_utc + timedelta(days=2)
+                programs = epg_svc.get_programs_in_range(
+                    stream.epg_channel_id,
+                    range_start=range_start,
+                    range_end=range_end,
+                )
+                listings = [_epg_listing_full(p, stream, now_utc) for p in programs]
+            else:
+                listings = []
+            return {
+                "epg_listings": listings,
+                "total_live": len(streams),
+                "total_vod": len(movies),
+            }
         return {
             "epg_listings": {},
             "total_live": len(streams),
@@ -301,14 +464,17 @@ def player_api(
 
 
 @router.get("/get.php")
+@router.get("/panel_api/get.php")
 def get_playlist(
     request: Request,
-    username: str = Query(...), password: str = Query(...),
+    username: Optional[str] = Query(None),
+    password: Optional[str] = Query(None),
+    token: Optional[str] = Query(None),
     type: str = Query("m3u_plus"),
     output: str = Query("ts"),
     db: Session = Depends(get_db),
 ):
-    user = _authenticate_user(username, password, db)
+    user = _authenticate_user(request, username, password, token, db)
     stream_svc = StreamService(db)
     cat_svc = CategoryService(db)
     movie_svc = MovieService(db)
@@ -345,11 +511,15 @@ def get_playlist(
 
 
 @router.get("/xmltv.php")
+@router.get("/panel_api/xmltv.php")
 def get_epg_xml(
-    username: str = Query(...), password: str = Query(...),
+    request: Request,
+    username: Optional[str] = Query(None),
+    password: Optional[str] = Query(None),
+    token: Optional[str] = Query(None),
     db: Session = Depends(get_db),
 ):
-    user = _authenticate_user(username, password, db)
+    user = _authenticate_user(request, username, password, token, db)
     stream_svc = StreamService(db)
     epg_svc = EpgService(db)
 
