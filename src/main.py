@@ -107,7 +107,12 @@ app.include_router(admin_reseller_router, prefix="/api/admin")
 
 # --- Player / Xtream Codes Compatible API ---
 from src.public.controllers.api.player_api import router as player_api_router
+from src.public.controllers.api.mag_api import router as mag_api_router
+from src.public.controllers.api.enigma2_api import router as enigma2_api_router
+
 app.include_router(player_api_router)
+app.include_router(mag_api_router)
+app.include_router(enigma2_api_router)
 
 # --- Reseller API ---
 from src.public.controllers.reseller.reseller_api import router as reseller_api_router
