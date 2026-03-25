@@ -106,6 +106,9 @@ from src.public.controllers.admin.backup_routes import router as admin_backup_ro
 from src.public.controllers.admin.diagnostics_routes import router as admin_diagnostics_router
 from src.public.controllers.admin.ticket_routes import router as admin_ticket_router
 from src.public.controllers.admin.access_code_routes import router as admin_access_code_router
+from src.public.controllers.admin.mass_routes import router as admin_mass_router
+from src.public.controllers.admin.device_routes import router as admin_device_router
+from src.public.controllers.admin.tools_routes import router as admin_tools_router
 
 app.include_router(admin_auth_router, prefix="/api/admin")
 app.include_router(admin_dashboard_router, prefix="/api/admin")
@@ -126,17 +129,22 @@ app.include_router(admin_backup_router, prefix="/api/admin")
 app.include_router(admin_diagnostics_router, prefix="/api/admin")
 app.include_router(admin_ticket_router, prefix="/api/admin")
 app.include_router(admin_access_code_router, prefix="/api/admin")
+app.include_router(admin_mass_router, prefix="/api/admin")
+app.include_router(admin_device_router, prefix="/api/admin")
+app.include_router(admin_tools_router, prefix="/api/admin")
 
 # --- Player / Xtream Codes Compatible API ---
 from src.public.controllers.api.player_api import router as player_api_router
 from src.public.controllers.api.mag_api import router as mag_api_router
 from src.public.controllers.api.enigma2_api import router as enigma2_api_router
 from src.public.controllers.api.xplugin_api import router as xplugin_api_router
+from src.public.controllers.player.player_routes import router as web_player_router
 
 app.include_router(player_api_router)
 app.include_router(mag_api_router)
 app.include_router(enigma2_api_router)
 app.include_router(xplugin_api_router)
+app.include_router(web_player_router)
 
 # --- Reseller API ---
 from src.public.controllers.reseller.reseller_api import router as reseller_api_router
