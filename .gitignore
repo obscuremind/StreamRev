@@ -10,3 +10,12 @@ venv/
 *.egg-info/
 dist/
 build/
+src/logs/
+src/tmp/*
+src/backups/*
+src/content/streams/*
+src/content/archive/*
+src/content/vod/*
+src/signals/*
+*.service
+!.gitkeep
