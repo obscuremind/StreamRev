@@ -26,6 +26,217 @@ from src.streaming.protection.connection_limiter import connection_limiter
 router = APIRouter(tags=["Streaming"])
 
 
+def _parse_path_stream_id(raw: str) -> int:
+    head = str(raw).rsplit(".", 1)[0]
+    if not head.isdigit():
+        raise HTTPException(status_code=400, detail="Invalid stream id")
+    return int(head)
+
+
+def _normalize_rtmp_url(url: str) -> str:
+    u = (url or "").strip()
+    if not u:
+        return ""
+    ul = u.lower()
+    if ul.startswith("rtmp://") or ul.startswith("rtmps://"):
+        return u
+    if ul.startswith("http://"):
+        return "rtmp://" + u[7:]
+    if ul.startswith("https://"):
+        return "rtmp://" + u[8:]
+    return "rtmp://" + u.lstrip("/")
+
+
+def _safe_segment_filename(name: str) -> str:
+    base = os.path.basename(name or "")
+    if not base or base != name or ".." in base:
+        raise HTTPException(status_code=400, detail="Invalid segment name")
+    if "/" in base or "\\" in base:
+        raise HTTPException(status_code=400, detail="Invalid segment name")
+    return base
+
+
+def _subtitle_file_for_stream(stream_id: int) -> str | None:
+    base = os.path.join(settings.CONTENT_DIR, "streams", str(stream_id))
+    for fname in ("subtitle.vtt", "subtitles.vtt", "default.vtt", "captions.vtt"):
+        p = os.path.join(base, fname)
+        if os.path.isfile(p):
+            return p
+    if os.path.isdir(base):
+        try:
+            for n in sorted(os.listdir(base)):
+                if n.lower().endswith(".vtt"):
+                    return os.path.join(base, n)
+        except OSError:
+            pass
+    return None
+
+
+def _thumbnail_file_for_stream(stream_id: int) -> tuple[str, str] | None:
+    base = os.path.join(settings.CONTENT_DIR, "streams", str(stream_id))
+    media_types = {
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".png": "image/png",
+        ".webp": "image/webp",
+    }
+    for fname in (
+        "thumb.jpg",
+        "thumbnail.jpg",
+        "poster.jpg",
+        "thumb.png",
+        "thumbnail.png",
+        "poster.png",
+    ):
+        p = os.path.join(base, fname)
+        if os.path.isfile(p):
+            ext = os.path.splitext(fname)[1].lower()
+            return p, media_types.get(ext, "application/octet-stream")
+    if os.path.isdir(base):
+        try:
+            for n in sorted(os.listdir(base)):
+                ext = os.path.splitext(n)[1].lower()
+                if ext in media_types:
+                    return os.path.join(base, n), media_types[ext]
+        except OSError:
+            pass
+    return None
+
+
+def _segment_media_type(name: str) -> str:
+    ext = os.path.splitext(name)[1].lower()
+    if ext in (".ts", ".mts"):
+        return "video/mp2t"
+    if ext == ".m4s":
+        return "video/mp4"
+    if ext == ".mp4":
+        return "video/mp4"
+    return "application/octet-stream"
+
+
+@router.get("/live/{username}/{password}/{stream_id_ext}/subtitle")
+async def live_subtitle(
+    username: str,
+    password: str,
+    stream_id_ext: str,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    stream_id = int(stream_id_ext.rsplit(".", 1)[0])
+    auth = StreamAuth(db)
+    ok, user, err = auth.authenticate(username, password)
+    if not ok:
+        raise HTTPException(status_code=403, detail=err)
+    client_ip = request.client.host if request.client else "unknown"
+    if not auth.check_ip_allowed(user, client_ip):
+        raise HTTPException(status_code=403, detail="IP not allowed")
+    user_agent = request.headers.get("user-agent") or ""
+    ok, _stream, err = auth.authorize_stream(
+        user,
+        stream_id,
+        user_agent=user_agent,
+        client_ip=client_ip,
+    )
+    if not ok:
+        raise HTTPException(status_code=403, detail=err)
+    if not connection_limiter.can_connect(user.id, user.max_connections):
+        raise HTTPException(status_code=403, detail="Max connections reached")
+    conn_id = f"{user.id}_{stream_id}_{client_ip}"
+    connection_limiter.add_connection(user.id, conn_id)
+    try:
+        path = _subtitle_file_for_stream(stream_id)
+        if not path:
+            raise HTTPException(status_code=404, detail="Subtitle not found")
+        return FileResponse(path, media_type="text/vtt", filename=os.path.basename(path))
+    finally:
+        connection_limiter.remove_connection(user.id, conn_id)
+
+
+@router.get("/live/{username}/{password}/{stream_id_ext}/thumb")
+async def live_thumb(
+    username: str,
+    password: str,
+    stream_id_ext: str,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    stream_id = int(stream_id_ext.rsplit(".", 1)[0])
+    auth = StreamAuth(db)
+    ok, user, err = auth.authenticate(username, password)
+    if not ok:
+        raise HTTPException(status_code=403, detail=err)
+    client_ip = request.client.host if request.client else "unknown"
+    if not auth.check_ip_allowed(user, client_ip):
+        raise HTTPException(status_code=403, detail="IP not allowed")
+    user_agent = request.headers.get("user-agent") or ""
+    ok, _stream, err = auth.authorize_stream(
+        user,
+        stream_id,
+        user_agent=user_agent,
+        client_ip=client_ip,
+    )
+    if not ok:
+        raise HTTPException(status_code=403, detail=err)
+    if not connection_limiter.can_connect(user.id, user.max_connections):
+        raise HTTPException(status_code=403, detail="Max connections reached")
+    conn_id = f"{user.id}_{stream_id}_{client_ip}"
+    connection_limiter.add_connection(user.id, conn_id)
+    try:
+        found = _thumbnail_file_for_stream(stream_id)
+        if not found:
+            raise HTTPException(status_code=404, detail="Thumbnail not found")
+        path, media_type = found
+        return FileResponse(
+            path, media_type=media_type, filename=os.path.basename(path)
+        )
+    finally:
+        connection_limiter.remove_connection(user.id, conn_id)
+
+
+@router.get("/live/{username}/{password}/{stream_id_ext}/key")
+async def live_drm_key_placeholder(
+    username: str,
+    password: str,
+    stream_id_ext: str,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    stream_id = int(stream_id_ext.rsplit(".", 1)[0])
+    auth = StreamAuth(db)
+    ok, user, err = auth.authenticate(username, password)
+    if not ok:
+        raise HTTPException(status_code=403, detail=err)
+    client_ip = request.client.host if request.client else "unknown"
+    if not auth.check_ip_allowed(user, client_ip):
+        raise HTTPException(status_code=403, detail="IP not allowed")
+    user_agent = request.headers.get("user-agent") or ""
+    ok, _stream, err = auth.authorize_stream(
+        user,
+        stream_id,
+        user_agent=user_agent,
+        client_ip=client_ip,
+    )
+    if not ok:
+        raise HTTPException(status_code=403, detail=err)
+    if not connection_limiter.can_connect(user.id, user.max_connections):
+        raise HTTPException(status_code=403, detail="Max connections reached")
+    conn_id = f"{user.id}_{stream_id}_{client_ip}"
+    connection_limiter.add_connection(user.id, conn_id)
+    try:
+        payload = {
+            "stream_id": stream_id,
+            "scheme": "clearkey",
+            "keys": [],
+            "message": "DRM key slot reserved; this build serves clear streams only.",
+        }
+        return Response(
+            content=json.dumps(payload),
+            media_type="application/json",
+        )
+    finally:
+        connection_limiter.remove_connection(user.id, conn_id)
+
+
 def _live_sources(stream: Stream) -> list:
     try:
         return json.loads(stream.stream_source) if stream.stream_source else []
@@ -211,6 +422,87 @@ async def hls_segment(stream_id: int, segment: str):
     if not data:
         raise HTTPException(status_code=404, detail="Segment not found")
     return Response(content=data, media_type="video/mp2t")
+
+
+@router.get("/rtmp/{username}/{password}/{stream_id}")
+async def rtmp_stream_redirect(
+    username: str,
+    password: str,
+    stream_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    sid = _parse_path_stream_id(stream_id)
+    auth = StreamAuth(db)
+    ok, user, err = auth.authenticate(username, password)
+    if not ok:
+        raise HTTPException(status_code=403, detail=err)
+    client_ip = request.client.host if request.client else "unknown"
+    if not auth.check_ip_allowed(user, client_ip):
+        raise HTTPException(status_code=403, detail="IP not allowed")
+    user_agent = request.headers.get("user-agent") or ""
+    ok, stream, err = auth.authorize_stream(
+        user,
+        sid,
+        user_agent=user_agent,
+        client_ip=client_ip,
+    )
+    if not ok:
+        raise HTTPException(status_code=403, detail=err)
+    if not connection_limiter.can_connect(user.id, user.max_connections):
+        raise HTTPException(status_code=403, detail="Max connections reached")
+    conn_id = f"{user.id}_{sid}_{client_ip}"
+    connection_limiter.add_connection(user.id, conn_id)
+    try:
+        sources = _live_sources(stream)
+        if not sources:
+            raise HTTPException(status_code=404, detail="No source available")
+        rtmp_url = _normalize_rtmp_url(sources[0])
+        if not rtmp_url:
+            raise HTTPException(status_code=404, detail="No RTMP source available")
+        return RedirectResponse(url=rtmp_url, status_code=302)
+    finally:
+        connection_limiter.remove_connection(user.id, conn_id)
+
+
+@router.get("/segment/{username}/{password}/{stream_id}/{segment_name}")
+async def authenticated_hls_segment(
+    username: str,
+    password: str,
+    stream_id: str,
+    segment_name: str,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    sid = _parse_path_stream_id(stream_id)
+    safe_name = _safe_segment_filename(segment_name)
+    auth = StreamAuth(db)
+    ok, user, err = auth.authenticate(username, password)
+    if not ok:
+        raise HTTPException(status_code=403, detail=err)
+    client_ip = request.client.host if request.client else "unknown"
+    if not auth.check_ip_allowed(user, client_ip):
+        raise HTTPException(status_code=403, detail="IP not allowed")
+    user_agent = request.headers.get("user-agent") or ""
+    ok, _stream, err = auth.authorize_stream(
+        user,
+        sid,
+        user_agent=user_agent,
+        client_ip=client_ip,
+    )
+    if not ok:
+        raise HTTPException(status_code=403, detail=err)
+    if not connection_limiter.can_connect(user.id, user.max_connections):
+        raise HTTPException(status_code=403, detail="Max connections reached")
+    conn_id = f"{user.id}_{sid}_{client_ip}"
+    connection_limiter.add_connection(user.id, conn_id)
+    try:
+        data = hls_handler.get_segment(sid, safe_name)
+        if not data:
+            raise HTTPException(status_code=404, detail="Segment not found")
+        return Response(content=data, media_type=_segment_media_type(safe_name))
+    finally:
+        connection_limiter.remove_connection(user.id, conn_id)
 
 
 def _parse_timeshift_start(raw: str) -> datetime:
