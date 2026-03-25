@@ -128,3 +128,55 @@ class EpgService:
             "channels": self.db.query(func.count(func.distinct(EpgData.epg_id))).scalar()
             or 0,
         }
+
+    def list_programs(
+        self,
+        epg_id: Optional[str] = None,
+        channel_id: Optional[int] = None,
+        page: int = 1,
+        per_page: int = 50,
+    ) -> Dict[str, Any]:
+        query = self.db.query(EpgData)
+        if epg_id is not None:
+            query = query.filter(EpgData.epg_id == epg_id)
+        if channel_id is not None:
+            query = query.filter(EpgData.channel_id == channel_id)
+        total = query.count()
+        items = (
+            query.order_by(EpgData.start.desc())
+            .offset((page - 1) * per_page)
+            .limit(per_page)
+            .all()
+        )
+        return {"items": items, "total": total, "page": page, "per_page": per_page}
+
+    def get_program_by_id(self, program_id: int) -> Optional[EpgData]:
+        return self.db.query(EpgData).filter(EpgData.id == program_id).first()
+
+    def create_program(self, data: Dict[str, Any]) -> EpgData:
+        row = EpgData(**data)
+        self.db.add(row)
+        self.db.commit()
+        self.db.refresh(row)
+        return row
+
+    def update_program(
+        self, program_id: int, data: Dict[str, Any]
+    ) -> Optional[EpgData]:
+        row = self.get_program_by_id(program_id)
+        if not row:
+            return None
+        for key, value in data.items():
+            if hasattr(row, key):
+                setattr(row, key, value)
+        self.db.commit()
+        self.db.refresh(row)
+        return row
+
+    def delete_program(self, program_id: int) -> bool:
+        row = self.get_program_by_id(program_id)
+        if not row:
+            return False
+        self.db.delete(row)
+        self.db.commit()
+        return True

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any, Dict, List, Optional
 
 from sqlalchemy import func
@@ -48,6 +49,17 @@ class LineService:
         self.db.commit()
         return True
 
+    def update_line(self, line_id: int, data: Dict[str, Any]) -> Optional[Line]:
+        line = self.get_by_id(line_id)
+        if not line:
+            return None
+        for key, value in data.items():
+            if hasattr(line, key):
+                setattr(line, key, value)
+        self.db.commit()
+        self.db.refresh(line)
+        return line
+
     def remove_user_lines(self, user_id: int) -> int:
         count = self.db.query(Line).filter(Line.user_id == user_id).delete()
         self.db.commit()
@@ -74,6 +86,14 @@ class PackageService:
     def __init__(self, db: Session) -> None:
         self.db = db
 
+    @staticmethod
+    def _encode_json_lists(data: Dict[str, Any]) -> Dict[str, Any]:
+        out = dict(data)
+        for field in ("allowed_bouquets", "allowed_output_types"):
+            if isinstance(out.get(field), list):
+                out[field] = json.dumps(out[field])
+        return out
+
     def get_all(self) -> List[Package]:
         return self.db.query(Package).order_by(Package.id.asc()).all()
 
@@ -81,7 +101,8 @@ class PackageService:
         return self.db.query(Package).filter(Package.id == package_id).first()
 
     def create(self, data: Dict[str, Any]) -> Package:
-        pkg = Package(**data)
+        payload = self._encode_json_lists(data)
+        pkg = Package(**payload)
         self.db.add(pkg)
         self.db.commit()
         self.db.refresh(pkg)
@@ -91,7 +112,8 @@ class PackageService:
         pkg = self.get_by_id(package_id)
         if not pkg:
             return None
-        for key, value in data.items():
+        payload = self._encode_json_lists(data)
+        for key, value in payload.items():
             if hasattr(pkg, key):
                 setattr(pkg, key, value)
         self.db.commit()
@@ -202,3 +224,16 @@ class ResellerService:
         self.db.commit()
         self.db.refresh(reseller)
         return reseller
+
+    def get_stats(self) -> Dict[str, int]:
+        return {
+            "total": self.db.query(func.count(Reseller.id)).scalar() or 0,
+            "enabled": self.db.query(func.count(Reseller.id))
+            .filter(Reseller.status == 1)
+            .scalar()
+            or 0,
+            "disabled": self.db.query(func.count(Reseller.id))
+            .filter(Reseller.status == 0)
+            .scalar()
+            or 0,
+        }

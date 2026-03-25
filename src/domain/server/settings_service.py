@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from sqlalchemy.orm import Session
 
@@ -56,6 +56,50 @@ class SettingsService:
 
     def clear_cache(self) -> None:
         self._cache.clear()
+
+    def list_rows(self) -> List[Setting]:
+        return self.db.query(Setting).order_by(Setting.key.asc()).all()
+
+    def get_row_by_id(self, row_id: int) -> Optional[Setting]:
+        return self.db.query(Setting).filter(Setting.id == row_id).first()
+
+    def create_row(self, key: str, value: Any, value_type: str = "string") -> Setting:
+        return self.set(key, value, value_type)
+
+    def update_row(self, row_id: int, data: Dict[str, Any]) -> Optional[Setting]:
+        row = self.get_row_by_id(row_id)
+        if not row:
+            return None
+        old_key = row.key
+        payload = dict(data)
+        if "key" in payload:
+            row.key = payload["key"]
+        if "value_type" in payload:
+            row.value_type = payload["value_type"]
+        if "value" in payload:
+            vt = row.value_type
+            val = payload["value"]
+            if vt == "json":
+                row.value = json.dumps(val)
+            elif vt == "bool":
+                row.value = "true" if bool(val) else "false"
+            else:
+                row.value = "" if val is None else str(val)
+        self.db.commit()
+        self.db.refresh(row)
+        self._cache.pop(old_key, None)
+        self._cache.pop(row.key, None)
+        return row
+
+    def delete_row_by_id(self, row_id: int) -> bool:
+        row = self.get_row_by_id(row_id)
+        if not row:
+            return False
+        k = row.key
+        self.db.delete(row)
+        self.db.commit()
+        self._cache.pop(k, None)
+        return True
 
     @staticmethod
     def _cast_value(value: str, value_type: str) -> Any:
