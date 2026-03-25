@@ -120,7 +120,10 @@ app.include_router(reseller_api_router, prefix="/api/reseller")
 
 # --- Streaming Routes ---
 from src.public.controllers.api.streaming_routes import router as streaming_router
+from src.public.controllers.api.internal_api import router as internal_router
+
 app.include_router(streaming_router)
+app.include_router(internal_router, prefix="/api")
 
 
 @app.get("/", response_class=HTMLResponse)
