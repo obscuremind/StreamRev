@@ -173,5 +173,127 @@ class StreamingEngine:
             "failed": len(self._active_streams) - active,
         }
 
+    def start_on_demand(self, stream_id: int, db) -> Optional[int]:
+        """Load stream from DB, resolve source URL, start FFmpeg, update ServerStream on main server."""
+        from sqlalchemy.orm import Session
+
+        from src.domain.models import ServerStream, Stream
+        from src.domain.server.service import ServerService
+
+        assert isinstance(db, Session)
+        stream = db.query(Stream).filter(Stream.id == stream_id).first()
+        if not stream or not stream.enabled:
+            return None
+        try:
+            sources = (
+                json.loads(stream.stream_source) if stream.stream_source else []
+            )
+        except (json.JSONDecodeError, TypeError):
+            sources = [stream.stream_source] if stream.stream_source else []
+        if not sources:
+            return None
+        idx = int(stream.current_source or 0) % len(sources)
+        source_url = sources[idx]
+        container = stream.target_container or "ts"
+        main = ServerService(db).get_main_server()
+        server_id = main.id if main else None
+        pid = self.start_stream(
+            stream_id,
+            source_url,
+            container=container,
+            custom_ffmpeg=stream.custom_ffmpeg,
+            read_native=stream.read_native,
+            server_id=server_id,
+        )
+        if pid is None:
+            return None
+        if main:
+            ss = (
+                db.query(ServerStream)
+                .filter(
+                    ServerStream.server_id == main.id,
+                    ServerStream.stream_id == stream_id,
+                )
+                .first()
+            )
+            if not ss:
+                ss = ServerStream(
+                    server_id=main.id,
+                    stream_id=stream_id,
+                    on_demand=True,
+                    stream_status=1,
+                    pid=pid,
+                    current_source=idx,
+                )
+                db.add(ss)
+            else:
+                ss.pid = pid
+                ss.stream_status = 1
+                ss.current_source = idx
+            db.commit()
+        return pid
+
+    def stop_on_demand(self, stream_id: int, db) -> bool:
+        """Stop FFmpeg for stream_id and mark ServerStream off on the main server."""
+        from sqlalchemy.orm import Session
+
+        from src.domain.models import ServerStream
+        from src.domain.server.service import ServerService
+
+        assert isinstance(db, Session)
+        ok = self.stop_stream(stream_id)
+        main = ServerService(db).get_main_server()
+        if main:
+            ss = (
+                db.query(ServerStream)
+                .filter(
+                    ServerStream.server_id == main.id,
+                    ServerStream.stream_id == stream_id,
+                )
+                .first()
+            )
+            if ss:
+                ss.pid = None
+                ss.stream_status = 0
+                db.commit()
+        return ok
+
+    def sync_with_db(self, db) -> Dict[str, int]:
+        """Align running processes with ServerStream rows on the main server (startup recovery)."""
+        from sqlalchemy.orm import Session
+
+        from src.domain.models import ServerStream, Stream
+        from src.domain.server.service import ServerService
+
+        assert isinstance(db, Session)
+        started = 0
+        stopped = 0
+        main = ServerService(db).get_main_server()
+        if not main:
+            return {"started": started, "stopped": stopped}
+        rows = (
+            db.query(ServerStream)
+            .filter(ServerStream.server_id == main.id)
+            .all()
+        )
+        for ss in rows:
+            st = db.query(Stream).filter(Stream.id == ss.stream_id).first()
+            if not st or not st.enabled:
+                if self.is_active(ss.stream_id):
+                    self.stop_on_demand(ss.stream_id, db)
+                    stopped += 1
+                continue
+            if ss.stream_status == 1:
+                if not self.is_active(ss.stream_id):
+                    if self.start_on_demand(ss.stream_id, db) is not None:
+                        started += 1
+            elif ss.stream_status == 0:
+                if self.is_active(ss.stream_id):
+                    self.stop_stream(ss.stream_id)
+                    ss.pid = None
+                    db.commit()
+                    stopped += 1
+        return {"started": started, "stopped": stopped}
+
 
 streaming_engine = StreamingEngine()

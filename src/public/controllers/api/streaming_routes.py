@@ -2,24 +2,60 @@
 Streaming routes for live channels, VOD, and series playback.
 Supports TS, M3U8, and direct source redirect.
 """
-from fastapi import APIRouter, Depends, HTTPException, Request, Response
-from fastapi.responses import RedirectResponse
-from sqlalchemy.orm import Session
+from __future__ import annotations
+
 import json
+import os
+from datetime import datetime, timedelta, timezone
+
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi.responses import FileResponse, RedirectResponse
+from sqlalchemy.orm import Session
+
+from src.core.config import settings
 from src.core.database import get_db
-from src.streaming.auth.stream_auth import StreamAuth
-from src.streaming.engine import streaming_engine
-from src.streaming.delivery.hls_handler import hls_handler
-from src.streaming.protection.connection_limiter import connection_limiter
-from src.domain.models import Stream, Movie, SeriesEpisode
 from src.domain.line.service import LineService
+from src.domain.models import Movie, SeriesEpisode, Server, ServerStream, Stream
+from src.domain.server.service import ServerService
+from src.streaming.auth.stream_auth import StreamAuth
+from src.streaming.balancer.proxy_selector import ProxySelector
+from src.streaming.delivery.hls_handler import hls_handler
+from src.streaming.engine import streaming_engine
+from src.streaming.protection.connection_limiter import connection_limiter
 
 router = APIRouter(tags=["Streaming"])
 
 
+def _live_sources(stream: Stream) -> list:
+    try:
+        return json.loads(stream.stream_source) if stream.stream_source else []
+    except (json.JSONDecodeError, TypeError):
+        return [stream.stream_source] if stream.stream_source else []
+
+
+def _stream_on_local_server(db: Session, stream_id: int) -> bool:
+    main = ServerService(db).get_main_server()
+    if not main:
+        return True
+    ss = (
+        db.query(ServerStream)
+        .filter(
+            ServerStream.server_id == main.id,
+            ServerStream.stream_id == stream_id,
+        )
+        .first()
+    )
+    return ss is not None
+
+
 @router.get("/live/{username}/{password}/{stream_id_ext}")
-async def live_stream(username: str, password: str, stream_id_ext: str,
-                      request: Request, db: Session = Depends(get_db)):
+async def live_stream(
+    username: str,
+    password: str,
+    stream_id_ext: str,
+    request: Request,
+    db: Session = Depends(get_db),
+):
     parts = stream_id_ext.rsplit(".", 1)
     stream_id = int(parts[0])
     container = parts[1] if len(parts) > 1 else "ts"
@@ -33,10 +69,11 @@ async def live_stream(username: str, password: str, stream_id_ext: str,
     if not auth.check_ip_allowed(user, client_ip):
         raise HTTPException(status_code=403, detail="IP not allowed")
 
+    user_agent = request.headers.get("user-agent") or ""
     ok, stream, err = auth.authorize_stream(
         user,
         stream_id,
-        user_agent=request.headers.get("user-agent"),
+        user_agent=user_agent,
         client_ip=client_ip,
     )
     if not ok:
@@ -49,48 +86,67 @@ async def live_stream(username: str, password: str, stream_id_ext: str,
     connection_limiter.add_connection(user.id, conn_id)
 
     line_svc = LineService(db)
-    line_svc.create_line({
-        "user_id": user.id,
-        "stream_id": stream_id,
-        "server_id": stream.tv_archive_server_id or 1,
-        "container": container,
-        "user_ip": client_ip,
-        "user_agent": request.headers.get("user-agent", ""),
-    })
+    line = None
+    try:
+        line = line_svc.create_line(
+            {
+                "user_id": user.id,
+                "stream_id": stream_id,
+                "server_id": stream.tv_archive_server_id or 1,
+                "container": container,
+                "user_ip": client_ip,
+                "user_agent": user_agent,
+            }
+        )
+        if stream.direct_source:
+            sources = _live_sources(stream)
+            if sources:
+                return RedirectResponse(url=sources[0], status_code=302)
+            raise HTTPException(status_code=404, detail="No source available")
 
-    if stream.direct_source:
-        sources = []
-        try:
-            sources = json.loads(stream.stream_source) if stream.stream_source else []
-        except (json.JSONDecodeError, TypeError):
-            sources = [stream.stream_source] if stream.stream_source else []
+        if not _stream_on_local_server(db, stream_id):
+            main = ServerService(db).get_main_server()
+            proxy = ProxySelector(db)
+            best = proxy.select_server(
+                stream_id,
+                exclude_server_id=main.id if main else None,
+            )
+            if best:
+                url = proxy.get_player_live_url(
+                    best, username, password, stream_id, container
+                )
+                return RedirectResponse(url=url, status_code=302)
+            raise HTTPException(
+                status_code=503,
+                detail="No edge server available for this stream",
+            )
+
+        if container == "m3u8":
+            playlist = hls_handler.get_playlist(stream_id)
+            if playlist:
+                return Response(
+                    content=playlist, media_type="application/vnd.apple.mpegurl"
+                )
+
+            sources = _live_sources(stream)
+            if sources:
+                streaming_engine.start_stream(
+                    stream_id, sources[0], container="m3u8"
+                )
+                return Response(
+                    content="#EXTM3U\n#EXT-X-VERSION:3\n",
+                    media_type="application/vnd.apple.mpegurl",
+                )
+
+        sources = _live_sources(stream)
         if sources:
             return RedirectResponse(url=sources[0], status_code=302)
-        raise HTTPException(status_code=404, detail="No source available")
 
-    if container == "m3u8":
-        playlist = hls_handler.get_playlist(stream_id)
-        if playlist:
-            return Response(content=playlist, media_type="application/vnd.apple.mpegurl")
-
-        sources = []
-        try:
-            sources = json.loads(stream.stream_source) if stream.stream_source else []
-        except (json.JSONDecodeError, TypeError):
-            sources = [stream.stream_source] if stream.stream_source else []
-        if sources:
-            streaming_engine.start_stream(stream_id, sources[0], container="m3u8")
-            return Response(content="#EXTM3U\n#EXT-X-VERSION:3\n", media_type="application/vnd.apple.mpegurl")
-
-    sources = []
-    try:
-        sources = json.loads(stream.stream_source) if stream.stream_source else []
-    except (json.JSONDecodeError, TypeError):
-        sources = [stream.stream_source] if stream.stream_source else []
-    if sources:
-        return RedirectResponse(url=sources[0], status_code=302)
-
-    raise HTTPException(status_code=404, detail="Stream not available")
+        raise HTTPException(status_code=404, detail="Stream not available")
+    finally:
+        connection_limiter.remove_connection(user.id, conn_id)
+        if line is not None:
+            line_svc.remove_line(line.id)
 
 
 @router.get("/movie/{username}/{password}/{movie_id_ext}")
@@ -157,11 +213,128 @@ async def hls_segment(stream_id: int, segment: str):
     return Response(content=data, media_type="video/mp2t")
 
 
+def _parse_timeshift_start(raw: str) -> datetime:
+    s = (raw or "").strip()
+    if not s:
+        raise HTTPException(status_code=400, detail="Missing start time")
+    if s.isdigit():
+        return datetime.fromtimestamp(int(s), tz=timezone.utc).replace(tzinfo=None)
+    for fmt in ("%Y%m%d%H%M%S", "%Y-%m-%d:%H-%M", "%Y-%m-%d %H:%M:%S"):
+        try:
+            return datetime.strptime(s, fmt)
+        except ValueError:
+            continue
+    raise HTTPException(status_code=400, detail="Invalid start time format")
+
+
+def _parse_timeshift_duration(raw: str) -> int:
+    s = (raw or "").strip()
+    if not s or not s.isdigit():
+        raise HTTPException(status_code=400, detail="Invalid duration")
+    return int(s)
+
+
 @router.get("/timeshift/{username}/{password}/{duration}/{start}/{stream_id_ext}")
-async def timeshift_stream(username: str, password: str, duration: str, start: str,
-                           stream_id_ext: str, request: Request, db: Session = Depends(get_db)):
+async def timeshift_stream(
+    username: str,
+    password: str,
+    duration: str,
+    start: str,
+    stream_id_ext: str,
+    request: Request,
+    db: Session = Depends(get_db),
+):
     auth = StreamAuth(db)
     ok, user, err = auth.authenticate(username, password)
     if not ok:
         raise HTTPException(status_code=403, detail=err)
-    raise HTTPException(status_code=501, detail="Timeshift not yet implemented")
+
+    client_ip = request.client.host if request.client else "unknown"
+    if not auth.check_ip_allowed(user, client_ip):
+        raise HTTPException(status_code=403, detail="IP not allowed")
+
+    user_agent = request.headers.get("user-agent") or ""
+
+    parts = stream_id_ext.rsplit(".", 1)
+    stream_id = int(parts[0])
+
+    ok, stream, err = auth.authorize_stream(
+        user,
+        stream_id,
+        user_agent=user_agent,
+        client_ip=client_ip,
+    )
+    if not ok:
+        raise HTTPException(status_code=403, detail=err)
+
+    if not stream.tv_archive:
+        raise HTTPException(status_code=403, detail="TV archive disabled for this channel")
+
+    start_dt = _parse_timeshift_start(start)
+    duration_sec = _parse_timeshift_duration(duration)
+
+    if stream.tv_archive_duration and stream.tv_archive_duration > 0:
+        oldest = datetime.utcnow() - timedelta(days=stream.tv_archive_duration)
+        if start_dt < oldest:
+            raise HTTPException(status_code=403, detail="Start time outside archive window")
+
+    date_dir = start_dt.strftime("%Y-%m-%d")
+    archive_dir = os.path.join(
+        settings.CONTENT_DIR, "archive", str(stream_id), date_dir
+    )
+
+    archive_server: Server | None = None
+    if stream.tv_archive_server_id:
+        archive_server = (
+            db.query(Server)
+            .filter(Server.id == stream.tv_archive_server_id)
+            .first()
+        )
+
+    main = ServerService(db).get_main_server()
+    use_remote = (
+        archive_server is not None
+        and main is not None
+        and archive_server.id != main.id
+    )
+
+    if use_remote:
+        protocol = archive_server.server_protocol or "http"
+        port = (
+            archive_server.https_port
+            if protocol == "https"
+            else archive_server.http_port
+        )
+        host = (archive_server.domain_name or "").strip() or archive_server.server_ip
+        base = (archive_server.timeshift_path or "").strip().rstrip("/")
+        if base:
+            dest = (
+                f"{base}/timeshift/{username}/{password}/"
+                f"{duration}/{start}/{stream_id_ext}"
+            )
+        else:
+            dest = (
+                f"{protocol}://{host}:{port}/timeshift/"
+                f"{username}/{password}/{duration}/{start}/{stream_id_ext}"
+            )
+        return RedirectResponse(url=dest, status_code=302)
+
+    if os.path.isdir(archive_dir):
+        for name in ("index.m3u8", "playlist.m3u8", "archive.m3u8"):
+            path = os.path.join(archive_dir, name)
+            if os.path.isfile(path):
+                return FileResponse(
+                    path, media_type="application/vnd.apple.mpegurl"
+                )
+        rel_base = f"/static/archive/{stream_id}/{date_dir}"
+        playlist_url = (
+            f"{rel_base}/index.m3u8?duration={duration_sec}&start={start}"
+        )
+        return RedirectResponse(url=playlist_url, status_code=302)
+
+    archive_url = (
+        f"{request.url.scheme}://{request.url.netloc}"
+        f"/content/archive/{stream_id}/{date_dir}/"
+        f"index.m3u8?duration={duration_sec}&start={start}"
+    )
+    return RedirectResponse(url=archive_url, status_code=302)

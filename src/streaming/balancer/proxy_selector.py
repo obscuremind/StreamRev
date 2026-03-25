@@ -23,3 +23,20 @@ class ProxySelector:
         protocol = server.server_protocol or "http"
         port = server.https_port if protocol == "https" else server.http_port
         return f"{protocol}://{server.server_ip}:{port}/live/{stream_id}.{container}"
+
+    def get_player_live_url(
+        self,
+        server: Server,
+        username: str,
+        password: str,
+        stream_id: int,
+        container: str = "ts",
+    ) -> str:
+        """Xtream-style live URL including credentials (panel-compatible path)."""
+        protocol = server.server_protocol or "http"
+        port = server.https_port if protocol == "https" else server.http_port
+        host = (server.domain_name or "").strip() or server.server_ip
+        return (
+            f"{protocol}://{host}:{port}/live/{username}/{password}/"
+            f"{stream_id}.{container}"
+        )

@@ -2,20 +2,29 @@
 
 from __future__ import annotations
 
+import urllib.request
 import xml.etree.ElementTree as ET
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from src.domain.models import EpgData
+from src.domain.models import EpgData, Stream
 
 
 def _local_tag(tag: str) -> str:
     if "}" in tag:
         return tag.rsplit("}", 1)[-1]
     return tag
+
+
+@dataclass
+class EpgSourceUrl:
+    """Configurable XMLTV feed location for auto-import."""
+
+    url: str
 
 
 def _parse_xmltv_datetime(raw: str) -> Optional[datetime]:
@@ -66,6 +75,43 @@ class EpgService:
             .all()
         )
 
+    def fetch_and_import(self, url: str, timeout: int = 120) -> int:
+        """Download XMLTV from URL and import programmes."""
+        req = urllib.request.Request(
+            url,
+            headers={"User-Agent": "IPTV-Panel-EPG/1.0"},
+        )
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            raw = resp.read()
+        content = raw.decode("utf-8", errors="replace")
+        return self.import_xmltv(content)
+
+    def link_channels(self, db: Optional[Session] = None) -> int:
+        """Set EpgData.channel_id from Stream.epg_channel_id matching EpgData.epg_id."""
+        sess = db or self.db
+        rows = (
+            sess.query(Stream)
+            .filter(Stream.epg_channel_id.isnot(None))
+            .filter(Stream.epg_channel_id != "")
+            .all()
+        )
+        epg_map: Dict[str, int] = {}
+        for s in rows:
+            key = (s.epg_channel_id or "").strip()
+            if key:
+                epg_map[key] = s.id
+        updated = 0
+        for prog in sess.query(EpgData).all():
+            eid = (prog.epg_id or "").strip()
+            if not eid or eid not in epg_map:
+                continue
+            cid = epg_map[eid]
+            if prog.channel_id != cid:
+                prog.channel_id = cid
+                updated += 1
+        sess.commit()
+        return updated
+
     def import_xmltv(self, xml_content: str) -> int:
         count = 0
         try:
@@ -103,9 +149,20 @@ class EpgService:
                 if title_el is not None
                 else "en"
             )
+            channel_id: Optional[int] = None
+            ck = ch.strip()
+            if ck:
+                st = (
+                    self.db.query(Stream)
+                    .filter(Stream.epg_channel_id == ck)
+                    .first()
+                )
+                if st is not None:
+                    channel_id = st.id
             self.db.add(
                 EpgData(
                     epg_id=ch,
+                    channel_id=channel_id,
                     title=title,
                     lang=lang,
                     start=start,

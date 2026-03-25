@@ -11,6 +11,7 @@ Commands:
     cron:streams     - Run streams maintenance cron
     cron:users       - Run users cleanup cron (expire users, etc.)
     cron:epg         - Run EPG update cron
+    cron:cleanup     - Stale lines, temp files, old stream logs
     cron:cache       - Run cache refresh cron
     cron:servers     - Run server health check cron
     cron:backups     - Run backup cron
@@ -108,10 +109,89 @@ def cron_epg():
     logger.info("Running EPG cron...")
     db = get_db()
     try:
+        import json
+
         from src.domain.epg.service import EpgService
+        from src.domain.server.settings_service import SettingsService
+
         svc = EpgService(db)
         cleared = svc.clear_old(days=7)
-        logger.info(f"EPG cron complete. Cleared {cleared} old entries.")
+
+        settings_svc = SettingsService(db)
+        sources = settings_svc.get("epg_sources", default=[])
+        if isinstance(sources, str):
+            try:
+                sources = json.loads(sources)
+            except (json.JSONDecodeError, TypeError):
+                sources = []
+        if not isinstance(sources, list):
+            sources = []
+
+        total_imported = 0
+        for item in sources:
+            if isinstance(item, str):
+                url = item.strip()
+            elif isinstance(item, dict):
+                url = (item.get("url") or "").strip()
+            else:
+                url = ""
+            if not url:
+                continue
+            try:
+                n = svc.fetch_and_import(url)
+                total_imported += n
+                logger.info(f"EPG imported {n} programmes from {url}")
+            except Exception as e:
+                logger.warning(f"EPG fetch failed for {url}: {e}")
+
+        linked = svc.link_channels()
+        logger.info(
+            f"EPG cron complete. Cleared {cleared} old entries, "
+            f"imported {total_imported} programmes, linked {linked} channel rows."
+        )
+    finally:
+        db.close()
+
+
+def cron_cleanup():
+    import time
+    from datetime import datetime, timedelta
+
+    from src.domain.models import Line, StreamLog
+
+    logger.info("Running cleanup cron...")
+    db = get_db()
+    try:
+        cutoff = datetime.utcnow() - timedelta(hours=24)
+        q = db.query(Line).filter(Line.date < cutoff)
+        stale_count = q.count()
+        q.delete(synchronize_session=False)
+        db.commit()
+        logger.info(f"Removed {stale_count} stale line(s) older than 24h.")
+
+        removed_tmp = 0
+        tmp_dir = settings.TMP_DIR
+        if os.path.isdir(tmp_dir):
+            threshold = time.time() - 86400
+            for root, _dirs, files in os.walk(tmp_dir):
+                for name in files:
+                    path = os.path.join(root, name)
+                    try:
+                        if os.path.isfile(path) and os.path.getmtime(path) < threshold:
+                            os.remove(path)
+                            removed_tmp += 1
+                    except OSError:
+                        pass
+        logger.info(f"Removed {removed_tmp} temp file(s) older than 24h.")
+
+        log_cutoff = datetime.utcnow() - timedelta(days=30)
+        log_deleted = (
+            db.query(StreamLog)
+            .filter(StreamLog.date < log_cutoff)
+            .delete(synchronize_session=False)
+        )
+        db.commit()
+        logger.info(f"Deleted {log_deleted} stream log row(s) older than 30 days.")
     finally:
         db.close()
 
@@ -201,7 +281,8 @@ def cmd_import_epg():
             from src.domain.epg.service import EpgService
             svc = EpgService(db)
             count = svc.import_xmltv(content)
-            print(f"Imported {count} EPG entries")
+            linked = svc.link_channels()
+            print(f"Imported {count} EPG entries, linked {linked} rows to channels")
         finally:
             db.close()
     except Exception as e:
@@ -252,6 +333,7 @@ COMMANDS = {
     "cron:streams": cron_streams,
     "cron:users": cron_users,
     "cron:epg": cron_epg,
+    "cron:cleanup": cron_cleanup,
     "cron:cache": cron_cache,
     "cron:servers": cron_servers,
     "cron:backups": cron_backups,
