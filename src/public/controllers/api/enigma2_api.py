@@ -6,9 +6,10 @@ Responses are UTF-8 XML with ``e2bouquetlist``, ``e2servicelist``, and ``e2event
 
 from __future__ import annotations
 
+import base64
 import html
 import json
-from typing import List, Optional
+from typing import Any, List, Optional
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
@@ -17,15 +18,20 @@ from sqlalchemy.orm import Session
 from src.core.auth.password import verify_password
 from src.core.database import get_db
 from src.domain.epg.service import EpgService
-from src.domain.models import Bouquet, EpgData, Stream, User
+from src.domain.models import Bouquet, EpgData, Series, Stream, User
 from src.domain.stream.service import StreamService
 from src.domain.user.service import UserService
+from src.domain.vod.service import SeriesService
 
 router = APIRouter(tags=["Enigma2 API"])
 
 
 def _esc(text: Optional[str]) -> str:
     return html.escape(text or "", quote=True)
+
+
+def _b64_utf8(text: Optional[str]) -> str:
+    return base64.b64encode((text or "").encode("utf-8")).decode("ascii")
 
 
 def _parse_bouquet_channel_ids(bouquet: Bouquet) -> List[int]:
@@ -141,6 +147,61 @@ def _xml_channel_list(
     return "\n".join(lines)
 
 
+def _xml_seasons_list(series: Series, season_numbers: List[int]) -> str:
+    lines = [
+        '<?xml version="1.0" encoding="UTF-8"?>',
+        "<e2seasonlist>",
+    ]
+    for sn in season_numbers:
+        lines.append("  <e2season>")
+        lines.append(f"    <e2seasonnumber>{int(sn)}</e2seasonnumber>")
+        lines.append(f"    <e2seasontitle>{_b64_utf8(f'Season {sn}')}</e2seasontitle>")
+        lines.append("  </e2season>")
+    lines.append("</e2seasonlist>")
+    return "\n".join(lines)
+
+
+def _xml_series_streams(
+    request: Request,
+    username: str,
+    password: str,
+    series: Series,
+    episodes: List[Any],
+) -> str:
+    base = str(request.base_url).rstrip("/")
+    lines = [
+        '<?xml version="1.0" encoding="UTF-8"?>',
+        "<e2streamlist>",
+    ]
+    for ep in episodes:
+        ext = ep.container_extension or "mp4"
+        url = f"{base}/series/{username}/{password}/{ep.id}.{ext}"
+        title_b64 = _b64_utf8(ep.stream_display_name or "")
+        lines.append("  <e2stream>")
+        lines.append(f"    <e2title>{title_b64}</e2title>")
+        lines.append(f"    <e2episode>{int(ep.episode_number)}</e2episode>")
+        lines.append(f"    <e2season>{int(ep.season_number or 1)}</e2season>")
+        lines.append("    <e2location><![CDATA[" + url + "]]></e2location>")
+        lines.append("  </e2stream>")
+    lines.append("</e2streamlist>")
+    return "\n".join(lines)
+
+
+def _xml_series_catalog(rows: List[Series]) -> str:
+    lines = [
+        '<?xml version="1.0" encoding="UTF-8"?>',
+        "<e2servicelist>",
+    ]
+    for s in rows:
+        title_b64 = _b64_utf8(s.title or "")
+        lines.append("  <e2service>")
+        lines.append(f"    <e2servicereference>{_esc(str(s.id))}</e2servicereference>")
+        lines.append(f"    <e2servicename>{title_b64}</e2servicename>")
+        lines.append("  </e2service>")
+    lines.append("</e2servicelist>")
+    return "\n".join(lines)
+
+
 def _xml_epg(programs: List[EpgData], stream: Stream) -> str:
     lines = [
         '<?xml version="1.0" encoding="UTF-8"?>',
@@ -190,11 +251,15 @@ def _handle_enigma2(
     action: Optional[str],
     bouquet_id: Optional[int],
     stream_id: Optional[int],
+    series_id: Optional[int],
+    season: Optional[int],
+    cat_id: Optional[int],
 ) -> Response:
     user = _authenticate(username, password, db)
     bouquets = _bouquets_for_user(db, user)
     stream_svc = StreamService(db)
     epg_svc = EpgService(db)
+    series_svc = SeriesService(db)
 
     act = (action or "").strip().lower() if action else ""
 
@@ -226,6 +291,39 @@ def _handle_enigma2(
         body = _xml_epg(programs[:200], stream)
         return Response(content=body, media_type="application/xml")
 
+    if act == "get_seasons":
+        if series_id is None:
+            raise HTTPException(status_code=400, detail="series_id required")
+        series = series_svc.get_by_id(series_id)
+        if not series:
+            raise HTTPException(status_code=404, detail="Series not found")
+        episodes = series_svc.get_episodes(series_id)
+        season_set = sorted({int(ep.season_number or 1) for ep in episodes})
+        body = _xml_seasons_list(series, season_set)
+        return Response(content=body, media_type="application/xml")
+
+    if act == "get_series_streams":
+        if series_id is None or season is None:
+            raise HTTPException(status_code=400, detail="series_id and season required")
+        series = series_svc.get_by_id(series_id)
+        if not series:
+            raise HTTPException(status_code=404, detail="Series not found")
+        episodes = [
+            ep
+            for ep in series_svc.get_episodes(series_id)
+            if int(ep.season_number or 1) == int(season)
+        ]
+        episodes.sort(key=lambda e: (e.episode_number or 0, e.id))
+        body = _xml_series_streams(request, username, password, series, episodes)
+        return Response(content=body, media_type="application/xml")
+
+    if act == "get_series":
+        if cat_id is None:
+            raise HTTPException(status_code=400, detail="cat_id required")
+        result = series_svc.get_all(category_id=cat_id, per_page=10_000)
+        body = _xml_series_catalog(result["items"])
+        return Response(content=body, media_type="application/xml")
+
     body = _xml_service_list_bouquets(bouquets)
     return Response(content=body, media_type="application/xml")
 
@@ -239,8 +337,22 @@ def enigma2_php(
     action: Optional[str] = Query(None),
     bouquet_id: Optional[int] = Query(None),
     stream_id: Optional[int] = Query(None),
+    series_id: Optional[int] = Query(None),
+    season: Optional[int] = Query(None),
+    cat_id: Optional[int] = Query(None),
 ):
-    return _handle_enigma2(request, db, username, password, action, bouquet_id, stream_id)
+    return _handle_enigma2(
+        request,
+        db,
+        username,
+        password,
+        action,
+        bouquet_id,
+        stream_id,
+        series_id,
+        season,
+        cat_id,
+    )
 
 
 @router.get("/enigma2/{username}/{password}/get_bouquets")
@@ -250,7 +362,9 @@ def enigma2_get_bouquets_path(
     password: str,
     db: Session = Depends(get_db),
 ):
-    return _handle_enigma2(request, db, username, password, "get_bouquets", None, None)
+    return _handle_enigma2(
+        request, db, username, password, "get_bouquets", None, None, None, None, None
+    )
 
 
 @router.get("/enigma2/{username}/{password}/channels/{bouquet_id}")
@@ -262,5 +376,14 @@ def enigma2_channels_path(
     db: Session = Depends(get_db),
 ):
     return _handle_enigma2(
-        request, db, username, password, "get_channels", bouquet_id, None
+        request,
+        db,
+        username,
+        password,
+        "get_channels",
+        bouquet_id,
+        None,
+        None,
+        None,
+        None,
     )
