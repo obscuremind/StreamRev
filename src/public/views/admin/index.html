@@ -501,6 +501,9 @@
             "<td>" + (row.enabled ? '<span class="badge badge-on">On</span>' : '<span class="badge badge-off">Off</span>') + "</td>" +
             '<td class="actions"><button type="button" class="btn btn-sm" data-edit="' + row.id + '">Edit</button> ' +
             '<button type="button" class="btn btn-sm" data-toggle="' + row.id + '">Toggle</button> ' +
+            '<button type="button" class="btn btn-sm" data-start="' + row.id + '" title="Start stream">&#9654;</button> ' +
+            '<button type="button" class="btn btn-sm" data-stop="' + row.id + '" title="Stop stream">&#9632;</button> ' +
+            '<button type="button" class="btn btn-sm" data-restart="' + row.id + '" title="Restart stream">&#8635;</button> ' +
             '<button type="button" class="btn btn-sm btn-danger" data-del="' + row.id + '">Delete</button></td></tr>';
         }).join("") || '<tr><td colspan="6" class="empty-state">No streams</td></tr>';
 
@@ -523,6 +526,15 @@
           try { await api("/streams/" + b.dataset.toggle + "/toggle", { method: "POST", body: "{}" }); toast("Toggled"); load(); } catch (e) { toast(e.message, "error"); }
         });
         $$("[data-del]").forEach((b) => b.onclick = () => delStream(+b.dataset.del, load));
+        $$("[data-start]").forEach((b) => b.onclick = async () => {
+          try { await api("/streams/" + b.dataset.start + "/start", { method: "POST", body: "{}" }); toast("Stream started"); } catch (e) { toast(e.message, "error"); }
+        });
+        $$("[data-stop]").forEach((b) => b.onclick = async () => {
+          try { await api("/streams/" + b.dataset.stop + "/stop", { method: "POST", body: "{}" }); toast("Stream stopped"); } catch (e) { toast(e.message, "error"); }
+        });
+        $$("[data-restart]").forEach((b) => b.onclick = async () => {
+          try { await api("/streams/" + b.dataset.restart + "/restart", { method: "POST", body: "{}" }); toast("Stream restarted"); } catch (e) { toast(e.message, "error"); }
+        });
       } catch (e) { $("#tbody").innerHTML = '<tr><td colspan="6">' + esc(e.message) + "</td></tr>"; }
     }
 
@@ -549,8 +561,19 @@
       '<div class="field"><label>Notes</label><input name="notes" /></div>' +
       '<div class="field"><label><input type="checkbox" name="enabled" checked /> Enabled</label></div>' +
       '<div class="field"><label><input type="checkbox" name="direct_source" /> Direct source</label></div>' +
+      '<div class="field"><label><input type="checkbox" name="read_native" /> Read native (-re)</label></div>' +
+      '<div class="field"><label><input type="checkbox" name="stream_all" /> Transcode all</label></div>' +
+      '<div class="field"><label><input type="checkbox" name="allow_record" /> Allow record</label></div>' +
       '<div class="field"><label><input type="checkbox" name="tv_archive" /> TV archive</label></div>' +
-      '<div class="field"><label>Archive duration</label><input name="tv_archive_duration" type="number" value="0" /></div></div>';
+      '<div class="field"><label>Archive duration (days)</label><input name="tv_archive_duration" type="number" value="0" /></div>' +
+      '<div class="field"><label>Archive server ID</label><input name="tv_archive_server_id" type="number" /></div>' +
+      '<div class="field"><label>Order</label><input name="order" type="number" value="0" /></div>' +
+      '<div class="full field"><label>Custom FFmpeg params</label><input name="custom_ffmpeg" placeholder="-c:v libx264 -preset fast" /></div>' +
+      '<div class="field"><label>Custom SID</label><input name="custom_sid" /></div>' +
+      '<div class="field"><label>Probed resolution</label><input name="probed_resolution" readonly style="opacity:0.6" /></div>' +
+      '<div style="text-align:right;grid-column:1/-1;margin-top:0.5rem">' +
+      '<button type="button" class="btn btn-sm" id="btn-probe-stream">Probe source</button> ' +
+      '<button type="button" class="btn btn-sm" id="btn-stream-status">Check status</button></div></div>';
 
     const fill = (row) => {
       for (const el of $$("[name]", body)) {
@@ -585,16 +608,47 @@
         stream_type: get("stream_type"),
         enabled: get("enabled"),
         direct_source: get("direct_source"),
+        read_native: get("read_native"),
+        stream_all: get("stream_all"),
+        allow_record: get("allow_record"),
         notes: get("notes"),
         target_container: get("target_container"),
         tv_archive: get("tv_archive"),
-        tv_archive_duration: get("tv_archive_duration")
+        tv_archive_duration: get("tv_archive_duration"),
+        tv_archive_server_id: get("tv_archive_server_id"),
+        order: get("order"),
+        custom_ffmpeg: get("custom_ffmpeg"),
+        custom_sid: get("custom_sid")
       };
       if (!payload.stream_display_name) { toast("Name required", "error"); return; }
       try {
         if (isNew) await api("/streams", { method: "POST", body: JSON.stringify(payload) });
         else await api("/streams/" + id, { method: "PUT", body: JSON.stringify(payload) });
         toast("Saved"); closeModalForm(); render();
+      } catch (e) { toast(e.message, "error"); }
+    };
+
+    const probBtn = body.querySelector("#btn-probe-stream");
+    if (probBtn) probBtn.onclick = async () => {
+      const url = body.querySelector("[name=stream_source]").value.trim();
+      if (!url) { toast("Enter a source URL first", "error"); return; }
+      toast("Probing...");
+      try {
+        const r = id ? await api("/streams/" + id + "/probe", { method: "POST", body: JSON.stringify({ url }) }) : await api("/streams/1/probe", { method: "POST", body: JSON.stringify({ url }) });
+        const res = body.querySelector("[name=probed_resolution]");
+        if (r.probe_result && r.probe_result.streams) {
+          const vs = r.probe_result.streams.find((s) => s.codec_type === "video");
+          if (vs) res.value = vs.width + "x" + vs.height;
+          else res.value = "No video stream";
+        } else res.value = "Probe returned no data";
+        toast("Probe complete");
+      } catch (e) { toast(e.message, "error"); }
+    };
+    const statusBtn = body.querySelector("#btn-stream-status");
+    if (statusBtn && id) statusBtn.onclick = async () => {
+      try {
+        const r = await api("/streams/" + id + "/status");
+        toast("Stream " + id + ": " + (r.running ? "RUNNING (PID " + r.pid + ")" : "STOPPED"));
       } catch (e) { toast(e.message, "error"); }
     };
   }
@@ -680,8 +734,11 @@
       '<div class="field"><label><input type="checkbox" name="is_restreamer" /> Restreamer</label></div>' +
       '<div class="field"><label><input type="checkbox" name="is_mag" /> MAG</label></div>' +
       '<div class="field"><label><input type="checkbox" name="is_stalker" /> Stalker</label></div>' +
-      '<div class="full field"><label>Allowed IPs (optional)</label><input name="allowed_ips" /></div>' +
-      '<div class="full field"><label>Allowed output IDs (optional)</label><input name="allowed_output_ids" /></div></div>';
+      '<div class="full field"><label>Allowed IPs (comma-separated, optional)</label><input name="allowed_ips" /></div>' +
+      '<div class="full field"><label>Allowed User Agents (comma-separated, optional)</label><input name="allowed_user_agents" /></div>' +
+      '<div class="full field"><label>Allowed output IDs (optional)</label><input name="allowed_output_ids" /></div>' +
+      '<div class="field"><label>Force server ID</label><input name="force_server_id" type="number" /></div>' +
+      '<div class="full field"><label>Reseller notes</label><input name="reseller_notes" /></div></div>';
 
     (async () => {
       if (!isNew) {
@@ -717,7 +774,10 @@
         allowed_ips: get("allowed_ips"),
         is_restreamer: get("is_restreamer"),
         is_mag: get("is_mag"),
-        is_stalker: get("is_stalker")
+        is_stalker: get("is_stalker"),
+        allowed_user_agents: get("allowed_user_agents"),
+        force_server_id: get("force_server_id") || null,
+        reseller_notes: get("reseller_notes")
       };
       if (isNew && !payload.password) { toast("Password required", "error"); return; }
       if (!isNew && !payload.password) delete payload.password;
