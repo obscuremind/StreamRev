@@ -99,6 +99,13 @@ from src.public.controllers.admin.settings_routes import router as admin_setting
 from src.public.controllers.admin.line_routes import router as admin_line_router
 from src.public.controllers.admin.reseller_routes import router as admin_reseller_router
 from src.public.controllers.admin.dashboard_routes import router as admin_dashboard_router
+from src.public.controllers.admin.provider_routes import router as admin_provider_router
+from src.public.controllers.admin.security_routes import router as admin_security_router
+from src.public.controllers.admin.logs_routes import router as admin_logs_router
+from src.public.controllers.admin.backup_routes import router as admin_backup_router
+from src.public.controllers.admin.diagnostics_routes import router as admin_diagnostics_router
+from src.public.controllers.admin.ticket_routes import router as admin_ticket_router
+from src.public.controllers.admin.access_code_routes import router as admin_access_code_router
 
 app.include_router(admin_auth_router, prefix="/api/admin")
 app.include_router(admin_dashboard_router, prefix="/api/admin")
@@ -112,6 +119,13 @@ app.include_router(admin_epg_router, prefix="/api/admin")
 app.include_router(admin_settings_router, prefix="/api/admin")
 app.include_router(admin_line_router, prefix="/api/admin")
 app.include_router(admin_reseller_router, prefix="/api/admin")
+app.include_router(admin_provider_router, prefix="/api/admin")
+app.include_router(admin_security_router, prefix="/api/admin")
+app.include_router(admin_logs_router, prefix="/api/admin")
+app.include_router(admin_backup_router, prefix="/api/admin")
+app.include_router(admin_diagnostics_router, prefix="/api/admin")
+app.include_router(admin_ticket_router, prefix="/api/admin")
+app.include_router(admin_access_code_router, prefix="/api/admin")
 
 # --- Player / Xtream Codes Compatible API ---
 from src.public.controllers.api.player_api import router as player_api_router
