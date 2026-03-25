@@ -57,6 +57,15 @@ class EpgService:
             .all()
         )
 
+    def get_all_programs(self, channel_id: str) -> List[EpgData]:
+        """All EPG rows for a channel id (epg_id), ordered by start time (e.g. XMLTV export)."""
+        return (
+            self.db.query(EpgData)
+            .filter(EpgData.epg_id == channel_id)
+            .order_by(EpgData.start.asc())
+            .all()
+        )
+
     def import_xmltv(self, xml_content: str) -> int:
         count = 0
         try:
