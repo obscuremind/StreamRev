@@ -75,6 +75,20 @@ class EpgService:
             .all()
         )
 
+    def get_programs_in_range(
+        self,
+        channel_id: str,
+        range_start: Optional[datetime] = None,
+        range_end: Optional[datetime] = None,
+    ) -> List[EpgData]:
+        """Programmes for epg_id overlapping [range_start, range_end] (naive UTC, inclusive window)."""
+        q = self.db.query(EpgData).filter(EpgData.epg_id == channel_id)
+        if range_start is not None:
+            q = q.filter(EpgData.end > range_start)
+        if range_end is not None:
+            q = q.filter(EpgData.start < range_end)
+        return q.order_by(EpgData.start.asc()).all()
+
     def fetch_and_import(self, url: str, timeout: int = 120) -> int:
         """Download XMLTV from URL and import programmes."""
         req = urllib.request.Request(

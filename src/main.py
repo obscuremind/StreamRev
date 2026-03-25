@@ -47,6 +47,14 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"Redis not available: {e}. Running without cache.")
 
+    from src.core.module.loader import ModuleLoader
+    modules_dir = os.path.join(os.path.dirname(__file__), "modules")
+    module_loader = ModuleLoader(modules_dir)
+    loaded = module_loader.load_all()
+    for name, mod in loaded.items():
+        mod.boot(app)
+        logger.info(f"Module '{name}' v{mod.get_version()} booted")
+
     yield
 
     try:
@@ -109,10 +117,12 @@ app.include_router(admin_reseller_router, prefix="/api/admin")
 from src.public.controllers.api.player_api import router as player_api_router
 from src.public.controllers.api.mag_api import router as mag_api_router
 from src.public.controllers.api.enigma2_api import router as enigma2_api_router
+from src.public.controllers.api.xplugin_api import router as xplugin_api_router
 
 app.include_router(player_api_router)
 app.include_router(mag_api_router)
 app.include_router(enigma2_api_router)
+app.include_router(xplugin_api_router)
 
 # --- Reseller API ---
 from src.public.controllers.reseller.reseller_api import router as reseller_api_router

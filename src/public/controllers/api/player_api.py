@@ -12,7 +12,7 @@ Endpoints:
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from sqlalchemy.orm import Session
 from typing import Optional
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import json
 from src.core.database import get_db
 from src.core.config import settings
@@ -24,6 +24,21 @@ from src.domain.epg.service import EpgService
 from src.domain.models import User
 
 router = APIRouter(tags=["Player API"])
+
+
+def _parse_epg_range_time(raw: Optional[str]) -> Optional[datetime]:
+    if raw is None or raw == "":
+        return None
+    try:
+        return datetime.utcfromtimestamp(int(raw))
+    except (ValueError, TypeError):
+        try:
+            dt = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+            if dt.tzinfo is not None:
+                dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
+            return dt
+        except ValueError:
+            return None
 
 
 def _authenticate_user(username: str, password: str, db: Session) -> User:
@@ -79,6 +94,8 @@ def player_api(
     vod_id: Optional[str] = Query(None),
     series_id: Optional[str] = Query(None),
     limit: Optional[str] = Query(None),
+    start: Optional[str] = Query(None),
+    end: Optional[str] = Query(None),
     db: Session = Depends(get_db),
 ):
     user = _authenticate_user(username, password, db)
@@ -187,6 +204,38 @@ def player_api(
             "episodes": seasons,
         }
 
+    elif action == "get_vod_info":
+        if not vod_id:
+            raise HTTPException(status_code=400, detail="vod_id required")
+        movie = movie_svc.get_by_id(int(vod_id))
+        if not movie:
+            raise HTTPException(status_code=404, detail="VOD not found")
+        return {
+            "info": {
+                "movie_image": movie.stream_icon or "",
+                "name": movie.stream_display_name,
+                "plot": movie.plot or "",
+                "cast": movie.cast or "",
+                "director": movie.director or "",
+                "genre": movie.genre or "",
+                "release_date": movie.release_date or "",
+                "rating": str(movie.rating or ""),
+                "backdrop_path": json.dumps([movie.backdrop_path]) if movie.backdrop_path else "[]",
+                "youtube_trailer": movie.youtube_trailer or "",
+                "duration_secs": movie.episode_run_time or 0,
+                "category_id": str(movie.category_id) if movie.category_id else "0",
+            },
+            "movie_data": {
+                "stream_id": movie.id,
+                "name": movie.stream_display_name,
+                "added": str(int(movie.added.timestamp())) if movie.added else "0",
+                "category_id": str(movie.category_id) if movie.category_id else "0",
+                "container_extension": movie.container_extension or "mp4",
+                "direct_source": "",
+                "custom_sid": movie.custom_sid or "",
+            },
+        }
+
     elif action == "get_short_epg":
         if not stream_id:
             raise HTTPException(status_code=400, detail="stream_id required")
@@ -203,6 +252,36 @@ def player_api(
                     "end": p.end.strftime("%Y-%m-%d %H:%M:%S") if p.end else "",
                     "description": p.description or "",
                     "channel_id": p.channel_id or "",
+                }
+                for p in programs
+            ]
+        }
+
+    elif action == "get_epg":
+        if not stream_id:
+            raise HTTPException(status_code=400, detail="stream_id required")
+        stream = stream_svc.get_by_id(int(stream_id))
+        if not stream or not stream.epg_channel_id:
+            return {"epg_listings": []}
+        now = datetime.utcnow()
+        range_start = _parse_epg_range_time(start) or now
+        range_end = _parse_epg_range_time(end) or (now + timedelta(days=7))
+        if range_end <= range_start:
+            range_end = range_start + timedelta(days=1)
+        programs = epg_svc.get_programs_in_range(
+            stream.epg_channel_id,
+            range_start=range_start,
+            range_end=range_end,
+        )
+        return {
+            "epg_listings": [
+                {
+                    "id": str(p.id), "epg_id": p.epg_id, "title": p.title or "",
+                    "lang": p.lang or "en",
+                    "start": p.start.strftime("%Y-%m-%d %H:%M:%S") if p.start else "",
+                    "end": p.end.strftime("%Y-%m-%d %H:%M:%S") if p.end else "",
+                    "description": p.description or "",
+                    "channel_id": str(p.channel_id) if p.channel_id is not None else "",
                 }
                 for p in programs
             ]
