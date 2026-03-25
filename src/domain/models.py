@@ -227,6 +227,9 @@ class User(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     username: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
     password: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    player_api_token: Mapped[Optional[str]] = mapped_column(
+        String(128), nullable=True, unique=True
+    )
     exp_date: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     max_connections: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     is_trial: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)

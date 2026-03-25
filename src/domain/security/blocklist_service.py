@@ -1,7 +1,7 @@
 """IP/User-Agent blocklist service for security."""
 
 import json
-from typing import List, Set
+from typing import ClassVar, Dict, List, Set
 
 from sqlalchemy.orm import Session
 
@@ -64,26 +64,27 @@ class BlocklistService:
 
 
 class BruteforceGuard:
+    """Tracks failed auth attempts per IP across requests (process-wide)."""
+
+    _attempts: ClassVar[Dict[str, int]] = {}
+
     def __init__(self, db: Session):
         self.db = db
         self._settings = SettingsService(db)
-        self._attempts = {}
 
     def record_attempt(self, ip: str, success: bool):
         if success:
-            self._attempts.pop(ip, None)
+            BruteforceGuard._attempts.pop(ip, None)
             return
-        if ip not in self._attempts:
-            self._attempts[ip] = 0
-        self._attempts[ip] += 1
+        BruteforceGuard._attempts[ip] = BruteforceGuard._attempts.get(ip, 0) + 1
 
     def is_blocked(self, ip: str) -> bool:
         max_attempts = int(self._settings.get("max_login_attempts", "10"))
-        return self._attempts.get(ip, 0) >= max_attempts
+        return BruteforceGuard._attempts.get(ip, 0) >= max_attempts
 
     def reset(self, ip: str):
-        self._attempts.pop(ip, None)
+        BruteforceGuard._attempts.pop(ip, None)
 
     def get_blocked_ips(self) -> List[str]:
         max_attempts = int(self._settings.get("max_login_attempts", "10"))
-        return [ip for ip, count in self._attempts.items() if count >= max_attempts]
+        return [ip for ip, count in BruteforceGuard._attempts.items() if count >= max_attempts]
