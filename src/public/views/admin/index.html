@@ -241,9 +241,17 @@
     { id: "bouquets", label: "Bouquets", icon: "💐" },
     { id: "servers", label: "Servers", icon: "🖥️" },
     { id: "epg", label: "EPG", icon: "📅" },
+    { id: "devices", label: "Devices (MAG/E2)", icon: "📺" },
+    { id: "providers", label: "Providers", icon: "🌐" },
     { id: "resellers", label: "Resellers", icon: "🏪" },
     { id: "packages", label: "Packages", icon: "📦" },
     { id: "lines", label: "Lines / Connections", icon: "🔗" },
+    { id: "tools", label: "Tools", icon: "🔧" },
+    { id: "security", label: "Security", icon: "🛡️" },
+    { id: "logs", label: "Logs", icon: "📋" },
+    { id: "backups", label: "Backups", icon: "💾" },
+    { id: "diagnostics", label: "Diagnostics", icon: "🔬" },
+    { id: "tickets", label: "Tickets", icon: "🎫" },
     { id: "settings", label: "Settings", icon: "⚙️" }
   ];
 
@@ -1728,6 +1736,146 @@
     };
   }
 
+  /* ——— Devices (MAG/Enigma2) ——— */
+  async function renderDevices() {
+    const c = $("#main-content");
+    c.innerHTML = '<h1 class="page-title">Devices (MAG / Enigma2)</h1>' +
+      '<div class="toolbar"><button class="btn" id="tab-mag">MAG Devices</button> <button class="btn" id="tab-e2">Enigma2 Devices</button></div>' +
+      '<div id="device-content"></div>';
+    async function loadMags() {
+      const r = await api("/mags?page=" + state.page + "&per_page=" + state.perPage);
+      $("#device-content").innerHTML = '<div class="table-wrap"><table class="data-table"><thead><tr><th>ID</th><th>Username</th><th>Max Conn</th><th>Expires</th><th>Enabled</th><th>Actions</th></tr></thead><tbody>' +
+        (r.items || []).map(u => "<tr><td>" + u.id + "</td><td>" + esc(u.username) + "</td><td>" + u.max_connections + "</td><td>" + esc(u.exp_date||"—") + "</td><td>" + (u.enabled?"On":"Off") + '</td><td><button class="btn btn-sm btn-danger" onclick="(async()=>{await api(\'/mags/'+u.id+'\',{method:\'DELETE\'});renderDevices()})()">Delete</button></td></tr>').join("") +
+        "</tbody></table></div>" + paginationHtml(r.total);
+      bindPagination({total:r.total, load:loadMags});
+    }
+    async function loadE2() {
+      const r = await api("/enigmas?page=" + state.page + "&per_page=" + state.perPage);
+      $("#device-content").innerHTML = '<div class="table-wrap"><table class="data-table"><thead><tr><th>ID</th><th>Username</th><th>Max Conn</th><th>Expires</th><th>Enabled</th><th>Actions</th></tr></thead><tbody>' +
+        (r.items || []).map(u => "<tr><td>" + u.id + "</td><td>" + esc(u.username) + "</td><td>" + u.max_connections + "</td><td>" + esc(u.exp_date||"—") + "</td><td>" + (u.enabled?"On":"Off") + '</td><td><button class="btn btn-sm btn-danger" onclick="(async()=>{await api(\'/enigmas/'+u.id+'\',{method:\'DELETE\'});renderDevices()})()">Delete</button></td></tr>').join("") +
+        "</tbody></table></div>" + paginationHtml(r.total);
+      bindPagination({total:r.total, load:loadE2});
+    }
+    $("#tab-mag").onclick = () => { state.page=1; loadMags(); };
+    $("#tab-e2").onclick = () => { state.page=1; loadE2(); };
+    await loadMags();
+  }
+
+  /* ——— Providers ——— */
+  async function renderProviders() {
+    const data = await api("/providers");
+    const c = $("#main-content");
+    c.innerHTML = '<h1 class="page-title">Stream Providers</h1><div class="table-wrap"><table class="data-table"><thead><tr><th>Domain</th><th>Streams</th></tr></thead><tbody>' +
+      data.map(p => "<tr><td>" + esc(p.domain) + "</td><td>" + p.stream_count + "</td></tr>").join("") +
+      "</tbody></table></div>";
+  }
+
+  /* ——— Tools ——— */
+  async function renderTools() {
+    const c = $("#main-content");
+    c.innerHTML = '<h1 class="page-title">Admin Tools</h1>' +
+      '<div class="stats-grid">' +
+      '<div class="stat-card" style="cursor:pointer" id="t-lc"><div class="stat-value">🔗</div><div class="stat-label">Live Connections</div></div>' +
+      '<div class="stat-card" style="cursor:pointer" id="t-pm"><div class="stat-value">⚡</div><div class="stat-label">Process Monitor</div></div>' +
+      '<div class="stat-card" style="cursor:pointer" id="t-prof"><div class="stat-value">🎚️</div><div class="stat-label">Transcode Profiles</div></div>' +
+      '<div class="stat-card" style="cursor:pointer" id="t-radio"><div class="stat-value">📻</div><div class="stat-label">Radio Streams</div></div>' +
+      '<div class="stat-card" style="cursor:pointer" id="t-cc"><div class="stat-value">📺</div><div class="stat-label">Created Channels</div></div>' +
+      '<div class="stat-card" style="cursor:pointer" id="t-ug"><div class="stat-value">👥</div><div class="stat-label">User Groups</div></div>' +
+      '<div class="stat-card" style="cursor:pointer" id="t-se"><div class="stat-value">⚠️</div><div class="stat-label">Stream Errors</div></div>' +
+      '<div class="stat-card" style="cursor:pointer" id="t-rtmp"><div class="stat-value">📡</div><div class="stat-label">RTMP Status</div></div>' +
+      '</div><div id="tool-detail"></div>';
+    $("#t-lc").onclick = async () => { const r = await api("/live-connections"); $("#tool-detail").innerHTML = "<h3>Live Connections (" + r.total + ")</h3><pre>" + JSON.stringify(r.connections, null, 2) + "</pre>"; };
+    $("#t-pm").onclick = async () => { const r = await api("/process-monitor"); $("#tool-detail").innerHTML = "<h3>Processes</h3><pre>" + JSON.stringify(r, null, 2) + "</pre>"; };
+    $("#t-prof").onclick = async () => { const r = await api("/profiles"); $("#tool-detail").innerHTML = "<h3>Transcoding Profiles</h3><pre>" + JSON.stringify(r.profiles, null, 2) + "</pre>"; };
+    $("#t-radio").onclick = async () => { const r = await api("/radios"); $("#tool-detail").innerHTML = "<h3>Radio Streams</h3><pre>" + JSON.stringify(r, null, 2) + "</pre>"; };
+    $("#t-cc").onclick = async () => { const r = await api("/created-channels"); $("#tool-detail").innerHTML = "<h3>Created Channels</h3><pre>" + JSON.stringify(r, null, 2) + "</pre>"; };
+    $("#t-ug").onclick = async () => { const r = await api("/user-groups"); $("#tool-detail").innerHTML = "<h3>User Groups</h3><pre>" + JSON.stringify(r.groups, null, 2) + "</pre>"; };
+    $("#t-se").onclick = async () => { const r = await api("/stream-errors"); $("#tool-detail").innerHTML = "<h3>Stream Errors</h3><pre>" + JSON.stringify(r, null, 2) + "</pre>"; };
+    $("#t-rtmp").onclick = async () => { const r = await api("/rtmp/status"); $("#tool-detail").innerHTML = "<h3>RTMP Status</h3><pre>" + JSON.stringify(r, null, 2) + "</pre>"; };
+  }
+
+  /* ——— Security ——— */
+  async function renderSecurity() {
+    const ips = await api("/security/blocked-ips");
+    const uas = await api("/security/blocked-user-agents");
+    const bf = await api("/security/bruteforce-blocked");
+    const isps = await api("/blocked-isps");
+    const c = $("#main-content");
+    c.innerHTML = '<h1 class="page-title">Security</h1><div class="stats-grid">' +
+      '<div class="stat-card"><div class="stat-value">' + (ips.ips||[]).length + '</div><div class="stat-label">Blocked IPs</div></div>' +
+      '<div class="stat-card"><div class="stat-value">' + (uas.patterns||[]).length + '</div><div class="stat-label">Blocked UAs</div></div>' +
+      '<div class="stat-card"><div class="stat-value">' + (bf.blocked_ips||[]).length + '</div><div class="stat-label">Brute-force Blocked</div></div>' +
+      '<div class="stat-card"><div class="stat-value">' + (isps.isps||[]).length + '</div><div class="stat-label">Blocked ISPs</div></div></div>' +
+      '<h3>Blocked IPs</h3><pre>' + JSON.stringify(ips.ips, null, 2) + '</pre>' +
+      '<h3>Blocked User Agents</h3><pre>' + JSON.stringify(uas.patterns, null, 2) + '</pre>' +
+      '<h3>Blocked ISPs</h3><pre>' + JSON.stringify(isps.isps, null, 2) + '</pre>';
+  }
+
+  /* ——— Logs ——— */
+  async function renderLogs() {
+    const c = $("#main-content");
+    c.innerHTML = '<h1 class="page-title">Logs</h1>' +
+      '<div class="toolbar"><button class="btn" id="l-stream">Stream Logs</button> <button class="btn" id="l-activity">Activity</button> <button class="btn" id="l-conn">Connections</button> <button class="btn" id="l-sys">System</button></div>' +
+      '<div id="log-content"></div>';
+    async function showStream() { const r = await api("/logs/stream?per_page=50"); $("#log-content").innerHTML = "<pre>" + JSON.stringify(r, null, 2) + "</pre>"; }
+    async function showActivity() { const r = await api("/logs/activity?per_page=50"); $("#log-content").innerHTML = "<pre>" + JSON.stringify(r, null, 2) + "</pre>"; }
+    async function showConn() { const r = await api("/logs/connections?per_page=50"); $("#log-content").innerHTML = "<pre>" + JSON.stringify(r, null, 2) + "</pre>"; }
+    async function showSys() { const r = await api("/logs/system"); $("#log-content").innerHTML = "<h3>Log files: " + (r.available||[]).join(", ") + "</h3><pre>" + (r.lines||[]).join("") + "</pre>"; }
+    $("#l-stream").onclick = showStream; $("#l-activity").onclick = showActivity; $("#l-conn").onclick = showConn; $("#l-sys").onclick = showSys;
+    await showStream();
+  }
+
+  /* ——— Backups ——— */
+  async function renderBackups() {
+    const data = await api("/backups");
+    const c = $("#main-content");
+    c.innerHTML = '<h1 class="page-title">Backups</h1><div class="toolbar"><button class="btn btn-primary" id="btn-backup-create">Create Backup</button></div>' +
+      '<div class="table-wrap"><table class="data-table"><thead><tr><th>Filename</th><th>Size</th><th>Created</th><th>Actions</th></tr></thead><tbody>' +
+      (data.backups||[]).map(b => "<tr><td>" + esc(b.filename) + "</td><td>" + (b.size/1024/1024).toFixed(2) + " MB</td><td>" + esc(b.created) + '</td><td><button class="btn btn-sm btn-danger" data-del-bk="' + b.filename + '">Delete</button></td></tr>').join("") +
+      '</tbody></table></div>';
+    $("#btn-backup-create").onclick = async () => { toast("Creating backup..."); const r = await api("/backups/create", {method:"POST"}); toast(r.status === "created" ? "Backup created: " + r.filename : "Error: " + (r.detail||r.status)); renderBackups(); };
+    $$("[data-del-bk]").forEach(b => b.onclick = async () => { await api("/backups/" + b.dataset.delBk, {method:"DELETE"}); toast("Deleted"); renderBackups(); });
+  }
+
+  /* ——— Diagnostics ——— */
+  async function renderDiagnostics() {
+    const data = await api("/diagnostics");
+    const c = $("#main-content");
+    c.innerHTML = '<h1 class="page-title">System Diagnostics</h1><div class="stats-grid">' +
+      '<div class="stat-card"><div class="stat-value">' + data.system.cpu_percent + '%</div><div class="stat-label">CPU Usage</div></div>' +
+      '<div class="stat-card"><div class="stat-value">' + data.memory.percent + '%</div><div class="stat-label">Memory Usage</div></div>' +
+      '<div class="stat-card"><div class="stat-value">' + data.disk.percent + '%</div><div class="stat-label">Disk Usage</div></div>' +
+      '<div class="stat-card"><div class="stat-value">' + (data.streaming.active||0) + '</div><div class="stat-label">Active Streams</div></div></div>' +
+      '<h3>System Info</h3><pre>' + JSON.stringify(data.system, null, 2) + '</pre>' +
+      '<h3>FFmpeg</h3><pre>' + JSON.stringify(data.ffmpeg, null, 2) + '</pre>' +
+      '<h3>Content Sizes</h3><pre>' + JSON.stringify(data.content_sizes, null, 2) + '</pre>' +
+      '<div class="toolbar"><button class="btn" id="btn-nginx-test">Test Nginx</button> <button class="btn" id="btn-nginx-reload">Reload Nginx</button> <button class="btn" id="btn-cert">Certificate Info</button> <button class="btn" id="btn-procs">Processes</button></div><div id="diag-detail"></div>';
+    $("#btn-nginx-test").onclick = async () => { const r = await api("/diagnostics/nginx/test",{method:"POST"}); $("#diag-detail").innerHTML = "<pre>" + esc(r.output||r.detail||JSON.stringify(r)) + "</pre>"; };
+    $("#btn-nginx-reload").onclick = async () => { const r = await api("/diagnostics/nginx/reload",{method:"POST"}); toast(r.status); };
+    $("#btn-cert").onclick = async () => { const r = await api("/diagnostics/certificates"); $("#diag-detail").innerHTML = "<pre>" + esc(r.info||r.detail||JSON.stringify(r)) + "</pre>"; };
+    $("#btn-procs").onclick = async () => { const r = await api("/diagnostics/processes"); $("#diag-detail").innerHTML = "<pre>" + JSON.stringify(r.processes, null, 2) + "</pre>"; };
+  }
+
+  /* ——— Tickets ——— */
+  async function renderTickets() {
+    const data = await api("/tickets");
+    const c = $("#main-content");
+    c.innerHTML = '<h1 class="page-title">Tickets</h1><div class="toolbar"><button class="btn btn-primary" id="btn-ticket-new">New Ticket</button></div>' +
+      '<div class="table-wrap"><table class="data-table"><thead><tr><th>ID</th><th>Subject</th><th>Priority</th><th>Status</th><th>Created</th><th>Actions</th></tr></thead><tbody>' +
+      (data.tickets||[]).map(t => "<tr><td>" + t.id + "</td><td>" + esc(t.subject) + "</td><td>" + esc(t.priority) + "</td><td>" + esc(t.status) + "</td><td>" + esc(t.created_at||"") + '</td><td><button class="btn btn-sm" data-view-tk="' + t.id + '">View</button></td></tr>').join("") +
+      '</tbody></table></div><div id="ticket-detail"></div>';
+    $("#btn-ticket-new").onclick = () => {
+      openModalForm("New Ticket","",null);
+      const body = $("#modal-form-body");
+      body.innerHTML = '<div class="field"><label>Subject</label><input name="subject" required /></div><div class="field"><label>Message</label><textarea name="message" rows="4"></textarea></div><div class="field"><label>Priority</label><select name="priority"><option>normal</option><option>high</option><option>low</option></select></div>';
+      $("#modal-form-save").onclick = async () => {
+        const s = body.querySelector("[name=subject]").value, m = body.querySelector("[name=message]").value, p = body.querySelector("[name=priority]").value;
+        await api("/tickets",{method:"POST",body:JSON.stringify({subject:s,message:m,priority:p})}); toast("Created"); closeModalForm(); renderTickets();
+      };
+    };
+    $$("[data-view-tk]").forEach(b => b.onclick = async () => { const t = await api("/tickets/" + b.dataset.viewTk); $("#ticket-detail").innerHTML = "<h3>" + esc(t.subject) + " [" + t.status + "]</h3><p>" + esc(t.message) + "</p><h4>Replies:</h4>" + (t.replies||[]).map(r => "<div style='border-left:3px solid var(--accent);padding-left:8px;margin:8px 0'><small>" + esc(r.by) + " at " + esc(r.at) + "</small><p>" + esc(r.message) + "</p></div>").join(""); });
+  }
+
   /* ——— Router ——— */
   function render() {
     clearSelection();
@@ -1741,9 +1889,17 @@
       bouquets: renderBouquets,
       servers: renderServers,
       epg: renderEpg,
+      devices: renderDevices,
+      providers: renderProviders,
       resellers: renderResellers,
       packages: renderPackages,
       lines: renderLines,
+      tools: renderTools,
+      security: renderSecurity,
+      logs: renderLogs,
+      backups: renderBackups,
+      diagnostics: renderDiagnostics,
+      tickets: renderTickets,
       settings: renderSettings
     };
     (map[state.section] || renderDashboard)().catch((e) => toast(e.message, "error"));
