@@ -1,0 +1,639 @@
+"""SQLAlchemy 2.0 domain models for an IPTV panel (XC_VM / Xtream Codes–style)."""
+
+from __future__ import annotations
+
+from datetime import datetime
+from typing import List, Optional
+
+from sqlalchemy import (
+    Boolean,
+    DateTime,
+    Float,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from src.core.database.connection import Base
+
+
+def _utcnow() -> datetime:
+    return datetime.utcnow()
+
+
+class StreamCategory(Base):
+    """Channel / VOD categories with optional hierarchy."""
+
+    __tablename__ = "stream_categories"
+    __table_args__ = (
+        Index("ix_stream_categories_parent_id", "parent_id"),
+        Index("ix_stream_categories_category_type", "category_type"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    category_name: Mapped[str] = mapped_column(String(255), nullable=False, default="")
+    category_type: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="live"
+    )  # live / movie / series / radio
+    parent_id: Mapped[Optional[int]] = mapped_column(
+        Integer, ForeignKey("stream_categories.id", ondelete="SET NULL"), nullable=True
+    )
+    order: Mapped[int] = mapped_column("order", Integer, nullable=False, default=0)
+
+    parent: Mapped[Optional["StreamCategory"]] = relationship(
+        "StreamCategory",
+        remote_side="StreamCategory.id",
+        back_populates="children",
+    )
+    children: Mapped[List["StreamCategory"]] = relationship(
+        "StreamCategory",
+        back_populates="parent",
+        foreign_keys=[parent_id],
+    )
+    streams: Mapped[List["Stream"]] = relationship(
+        "Stream", back_populates="category", foreign_keys="Stream.category_id"
+    )
+    movies: Mapped[List["Movie"]] = relationship("Movie", back_populates="category")
+    series_list: Mapped[List["Series"]] = relationship(
+        "Series", back_populates="category"
+    )
+
+
+class Server(Base):
+    """Streaming / panel server nodes (load-balanced hierarchy)."""
+
+    __tablename__ = "servers"
+    __table_args__ = (
+        Index("ix_servers_parent_id", "parent_id"),
+        Index("ix_servers_status", "status"),
+        Index("ix_servers_is_main", "is_main"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    server_name: Mapped[str] = mapped_column(String(255), nullable=False, default="")
+    server_ip: Mapped[str] = mapped_column(String(255), nullable=False, default="")
+    server_hardware_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    domain_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    http_port: Mapped[int] = mapped_column(Integer, nullable=False, default=80)
+    https_port: Mapped[int] = mapped_column(Integer, nullable=False, default=443)
+    rtmp_port: Mapped[int] = mapped_column(Integer, nullable=False, default=1935)
+    server_protocol: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="http"
+    )  # http / https
+    vpn_ip: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    total_clients: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    is_main: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    status: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0
+    )  # 0 offline, 1 online
+    parent_id: Mapped[Optional[int]] = mapped_column(
+        Integer, ForeignKey("servers.id", ondelete="SET NULL"), nullable=True
+    )
+    network_guaranteed_speed: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    total_bandwidth_usage: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    ssh_port: Mapped[int] = mapped_column(Integer, nullable=False, default=22)
+    ssh_user: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    ssh_password: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    server_key: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    timeshift_path: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    rtmp_path: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    enable_geoip: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+
+    parent: Mapped[Optional["Server"]] = relationship(
+        "Server",
+        remote_side="Server.id",
+        back_populates="children",
+    )
+    children: Mapped[List["Server"]] = relationship(
+        "Server",
+        back_populates="parent",
+        foreign_keys=[parent_id],
+    )
+    server_streams: Mapped[List["ServerStream"]] = relationship(
+        "ServerStream", back_populates="server", cascade="all, delete-orphan"
+    )
+    lines: Mapped[List["Line"]] = relationship(
+        "Line", back_populates="server", foreign_keys="Line.server_id"
+    )
+    user_activities: Mapped[List["UserActivity"]] = relationship(
+        "UserActivity", back_populates="server"
+    )
+    stream_logs: Mapped[List["StreamLog"]] = relationship(
+        "StreamLog", back_populates="server"
+    )
+    forced_users: Mapped[List["User"]] = relationship(
+        "User",
+        back_populates="force_server",
+        foreign_keys="User.force_server_id",
+    )
+    packages_forced: Mapped[List["Package"]] = relationship(
+        "Package",
+        back_populates="force_server",
+        foreign_keys="Package.force_server_id",
+    )
+
+
+class Stream(Base):
+    """Live / created live / movie / radio stream definitions."""
+
+    __tablename__ = "streams"
+    __table_args__ = (
+        Index("ix_streams_category_id", "category_id"),
+        Index("ix_streams_enabled", "enabled"),
+        Index("ix_streams_stream_type", "type"),
+        Index("ix_streams_tv_archive_server_id", "tv_archive_server_id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    stream_display_name: Mapped[str] = mapped_column(String(512), nullable=False, default="")
+    stream_source: Mapped[str] = mapped_column(
+        Text, nullable=False, default="[]"
+    )  # JSON array of URLs
+    stream_icon: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    epg_channel_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    added: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=_utcnow
+    )
+    category_id: Mapped[Optional[int]] = mapped_column(
+        Integer, ForeignKey("stream_categories.id", ondelete="SET NULL"), nullable=True
+    )
+    custom_ffmpeg: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    custom_sid: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    stream_all: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    stream_type: Mapped[int] = mapped_column(
+        "type",
+        Integer,
+        nullable=False,
+        default=1,
+    )  # 1 live, 2 created_live, 3 movie, 4 radio, 5 created_vod
+    target_container: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="ts"
+    )  # ts / m3u8 / rtmp
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    direct_source: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    read_native: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    allow_record: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    probed_resolution: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    current_source: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    tv_archive: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    tv_archive_duration: Mapped[Optional[int]] = mapped_column(
+        Integer, nullable=True
+    )  # days
+    tv_archive_server_id: Mapped[Optional[int]] = mapped_column(
+        Integer, ForeignKey("servers.id", ondelete="SET NULL"), nullable=True
+    )
+    order: Mapped[int] = mapped_column("order", Integer, nullable=False, default=0)
+
+    category: Mapped[Optional["StreamCategory"]] = relationship(
+        "StreamCategory", back_populates="streams"
+    )
+    tv_archive_server: Mapped[Optional["Server"]] = relationship(
+        "Server",
+        foreign_keys=[tv_archive_server_id],
+    )
+    server_streams: Mapped[List["ServerStream"]] = relationship(
+        "ServerStream", back_populates="stream", cascade="all, delete-orphan"
+    )
+    lines: Mapped[List["Line"]] = relationship(
+        "Line", back_populates="stream", foreign_keys="Line.stream_id"
+    )
+    user_activities: Mapped[List["UserActivity"]] = relationship(
+        "UserActivity", back_populates="stream"
+    )
+    stream_logs: Mapped[List["StreamLog"]] = relationship(
+        "StreamLog", back_populates="stream", cascade="all, delete-orphan"
+    )
+    epg_programs: Mapped[List["EpgData"]] = relationship(
+        "EpgData",
+        back_populates="channel",
+        foreign_keys="EpgData.channel_id",
+    )
+
+
+class User(Base):
+    """IPTV end users / subscribers."""
+
+    __tablename__ = "users"
+    __table_args__ = (
+        Index("ix_users_enabled", "enabled"),
+        Index("ix_users_force_server_id", "force_server_id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    username: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
+    password: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    exp_date: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    max_connections: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    is_trial: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    is_admin: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    admin_notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    reseller_notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=_utcnow
+    )
+    allowed_ips: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    allowed_user_agents: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    is_restreamer: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    force_server_id: Mapped[Optional[int]] = mapped_column(
+        Integer, ForeignKey("servers.id", ondelete="SET NULL"), nullable=True
+    )
+    bouquet: Mapped[Optional[str]] = mapped_column(
+        Text, nullable=True
+    )  # comma-separated bouquet IDs
+    allowed_output_ids: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    is_stalker: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    is_mag: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+    force_server: Mapped[Optional["Server"]] = relationship(
+        "Server",
+        back_populates="forced_users",
+        foreign_keys=[force_server_id],
+    )
+    lines: Mapped[List["Line"]] = relationship(
+        "Line", back_populates="user", cascade="all, delete-orphan"
+    )
+    activities: Mapped[List["UserActivity"]] = relationship(
+        "UserActivity",
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )
+
+
+class Line(Base):
+    """Active subscriber lines / connections."""
+
+    __tablename__ = "lines"
+    __table_args__ = (
+        Index("ix_lines_user_id", "user_id"),
+        Index("ix_lines_server_id", "server_id"),
+        Index("ix_lines_stream_id", "stream_id"),
+        Index("ix_lines_date", "date"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    server_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("servers.id", ondelete="CASCADE"), nullable=False
+    )
+    stream_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("streams.id", ondelete="CASCADE"), nullable=False
+    )
+    container: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="ts"
+    )  # ts / m3u8 / rtmp
+    pid: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    date: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=_utcnow)
+    user_agent: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    user_ip: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    geoip_country_code: Mapped[Optional[str]] = mapped_column(String(8), nullable=True)
+    bitrate: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    external_device: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    user: Mapped["User"] = relationship("User", back_populates="lines")
+    server: Mapped["Server"] = relationship("Server", back_populates="lines")
+    stream: Mapped["Stream"] = relationship("Stream", back_populates="lines")
+
+
+class Bouquet(Base):
+    """Channel / VOD packages."""
+
+    __tablename__ = "bouquets"
+    __table_args__ = (Index("ix_bouquets_bouquet_order", "bouquet_order"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    bouquet_name: Mapped[str] = mapped_column(String(255), nullable=False, default="")
+    bouquet_channels: Mapped[str] = mapped_column(
+        Text, nullable=False, default="[]"
+    )  # JSON stream IDs
+    bouquet_movies: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+    bouquet_radios: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+    bouquet_series: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+    bouquet_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+
+class ServerStream(Base):
+    """Per-server stream state (many-to-many with attributes)."""
+
+    __tablename__ = "server_streams"
+    __table_args__ = (
+        UniqueConstraint("server_id", "stream_id", name="uq_server_streams_server_stream"),
+        Index("ix_server_streams_server_id", "server_id"),
+        Index("ix_server_streams_stream_id", "stream_id"),
+        Index("ix_server_streams_stream_status", "stream_status"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    server_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("servers.id", ondelete="CASCADE"), nullable=False
+    )
+    stream_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("streams.id", ondelete="CASCADE"), nullable=False
+    )
+    pid: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    on_demand: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    stream_status: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0
+    )  # 0 off, 1 on, 2 starting, 3 stopping
+    bitrate: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    current_source: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+    server: Mapped["Server"] = relationship("Server", back_populates="server_streams")
+    stream: Mapped["Stream"] = relationship("Stream", back_populates="server_streams")
+
+
+class EpgData(Base):
+    """Electronic program guide rows."""
+
+    __tablename__ = "epg_data"
+    __table_args__ = (
+        Index("ix_epg_data_epg_id", "epg_id"),
+        Index("ix_epg_data_channel_id", "channel_id"),
+        Index("ix_epg_data_start_end", "start", "end"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    epg_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    title: Mapped[str] = mapped_column(String(512), nullable=False, default="")
+    lang: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)
+    start: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    end: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    channel_id: Mapped[Optional[int]] = mapped_column(
+        Integer, ForeignKey("streams.id", ondelete="CASCADE"), nullable=True
+    )
+
+    channel: Mapped[Optional["Stream"]] = relationship(
+        "Stream",
+        back_populates="epg_programs",
+        foreign_keys=[channel_id],
+    )
+
+
+class Movie(Base):
+    """Video on demand (movies)."""
+
+    __tablename__ = "movies"
+    __table_args__ = (Index("ix_movies_category_id", "category_id"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    stream_display_name: Mapped[str] = mapped_column(String(512), nullable=False, default="")
+    stream_source: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    stream_icon: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    rating: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    rating_5based: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    category_id: Mapped[Optional[int]] = mapped_column(
+        Integer, ForeignKey("stream_categories.id", ondelete="SET NULL"), nullable=True
+    )
+    container_extension: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="mkv"
+    )  # mkv / mp4 / avi
+    custom_sid: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    added: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=_utcnow
+    )
+    direct_source: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    target_container: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="ts"
+    )
+    tmdb_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    plot: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    cast: Mapped[Optional[str]] = mapped_column("cast", Text, nullable=True)
+    director: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    genre: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    release_date: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    episode_run_time: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    youtube_trailer: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    backdrop_path: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    category: Mapped[Optional["StreamCategory"]] = relationship(
+        "StreamCategory", back_populates="movies"
+    )
+
+
+class Series(Base):
+    """TV series metadata."""
+
+    __tablename__ = "series"
+    __table_args__ = (Index("ix_series_category_id", "category_id"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    title: Mapped[str] = mapped_column(String(512), nullable=False, default="")
+    category_id: Mapped[Optional[int]] = mapped_column(
+        Integer, ForeignKey("stream_categories.id", ondelete="SET NULL"), nullable=True
+    )
+    cover: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    plot: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    cast: Mapped[Optional[str]] = mapped_column("cast", Text, nullable=True)
+    director: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    genre: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    release_date: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    rating: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    rating_5based: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    backdrop_path: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    youtube_trailer: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    tmdb_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    last_modified: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=_utcnow, onupdate=_utcnow
+    )
+
+    category: Mapped[Optional["StreamCategory"]] = relationship(
+        "StreamCategory", back_populates="series_list"
+    )
+    episodes: Mapped[List["SeriesEpisode"]] = relationship(
+        "SeriesEpisode",
+        back_populates="series",
+        cascade="all, delete-orphan",
+    )
+
+
+class SeriesEpisode(Base):
+    """Episodes belonging to a series."""
+
+    __tablename__ = "series_episodes"
+    __table_args__ = (
+        Index("ix_series_episodes_series_id", "series_id"),
+        Index("ix_series_episodes_season_episode", "series_id", "season_number", "episode_number"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    series_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("series.id", ondelete="CASCADE"), nullable=False
+    )
+    season_number: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    episode_number: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    stream_display_name: Mapped[str] = mapped_column(String(512), nullable=False, default="")
+    stream_source: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    container_extension: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="mkv"
+    )
+    custom_sid: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    added: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=_utcnow
+    )
+    direct_source: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    tmdb_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    plot: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    duration: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    rating: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    movie_image: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    bitrate: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+
+    series: Mapped["Series"] = relationship("Series", back_populates="episodes")
+
+
+class Package(Base):
+    """Reseller subscription packages."""
+
+    __tablename__ = "packages"
+    __table_args__ = (Index("ix_packages_force_server_id", "force_server_id"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    package_name: Mapped[str] = mapped_column(String(255), nullable=False, default="")
+    is_trial: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    is_official: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    trial_credits: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    official_credits: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    trial_duration: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    official_duration: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    max_connections: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    allowed_bouquets: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+    allowed_output_types: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+    can_general_edit: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    activity_type: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    only_mag: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    only_enigma: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    force_server_id: Mapped[Optional[int]] = mapped_column(
+        Integer, ForeignKey("servers.id", ondelete="SET NULL"), nullable=True
+    )
+    max_sub_resellers: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    only_stalker: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+    force_server: Mapped[Optional["Server"]] = relationship(
+        "Server",
+        back_populates="packages_forced",
+        foreign_keys=[force_server_id],
+    )
+
+
+class Reseller(Base):
+    """Reseller panel accounts."""
+
+    __tablename__ = "resellers"
+    __table_args__ = (
+        Index("ix_resellers_owner_id", "owner_id"),
+        Index("ix_resellers_status", "status"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    username: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
+    password: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    owner_id: Mapped[Optional[int]] = mapped_column(
+        Integer, ForeignKey("resellers.id", ondelete="SET NULL"), nullable=True
+    )
+    credits: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    status: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=1
+    )  # 0 disabled, 1 enabled
+    allowed_ips: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    max_credits: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    allowed_packages: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    owner: Mapped[Optional["Reseller"]] = relationship(
+        "Reseller",
+        remote_side="Reseller.id",
+        back_populates="sub_resellers",
+        foreign_keys=[owner_id],
+    )
+    sub_resellers: Mapped[List["Reseller"]] = relationship(
+        "Reseller",
+        back_populates="owner",
+        foreign_keys=[owner_id],
+    )
+
+
+class UserActivity(Base):
+    """Historical user playback / connection activity."""
+
+    __tablename__ = "user_activity"
+    __table_args__ = (
+        Index("ix_user_activity_user_id", "user_id"),
+        Index("ix_user_activity_stream_id", "stream_id"),
+        Index("ix_user_activity_server_id", "server_id"),
+        Index("ix_user_activity_date_start", "date_start"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    stream_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("streams.id", ondelete="CASCADE"), nullable=False
+    )
+    server_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("servers.id", ondelete="CASCADE"), nullable=False
+    )
+    user_agent: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    user_ip: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    container: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="ts"
+    )
+    date_start: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=_utcnow
+    )
+    date_stop: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    geoip_country_code: Mapped[Optional[str]] = mapped_column(String(8), nullable=True)
+
+    user: Mapped["User"] = relationship("User", back_populates="activities")
+    stream: Mapped["Stream"] = relationship("Stream", back_populates="user_activities")
+    server: Mapped["Server"] = relationship("Server", back_populates="user_activities")
+
+
+class StreamLog(Base):
+    """Per-stream operational logs on a server."""
+
+    __tablename__ = "stream_logs"
+    __table_args__ = (
+        Index("ix_stream_logs_stream_id", "stream_id"),
+        Index("ix_stream_logs_server_id", "server_id"),
+        Index("ix_stream_logs_date", "date"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    stream_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("streams.id", ondelete="CASCADE"), nullable=False
+    )
+    server_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("servers.id", ondelete="CASCADE"), nullable=False
+    )
+    date: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=_utcnow)
+    info: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    log_type: Mapped[Optional[str]] = mapped_column("type", String(64), nullable=True)
+
+    stream: Mapped["Stream"] = relationship("Stream", back_populates="stream_logs")
+    server: Mapped["Server"] = relationship("Server", back_populates="stream_logs")
+
+
+class Setting(Base):
+    """Key-value system settings."""
+
+    __tablename__ = "settings"
+    __table_args__ = ()
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    key: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
+    value: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    value_type: Mapped[str] = mapped_column(
+        "type",
+        String(16),
+        nullable=False,
+        default="string",
+    )  # string / int / bool / json
