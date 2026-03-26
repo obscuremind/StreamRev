@@ -1,0 +1,25 @@
+{
+    "tmdb": {
+        "enabled": true,
+        "api_key": ""
+    },
+    "plex": {
+        "enabled": false
+    },
+    "watch": {
+        "enabled": false,
+        "watch_dirs": []
+    },
+    "ministra": {
+        "enabled": false
+    },
+    "fingerprint": {
+        "enabled": true
+    },
+    "theft_detection": {
+        "enabled": true
+    },
+    "magscan": {
+        "enabled": false
+    }
+}

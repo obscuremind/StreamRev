@@ -1,0 +1,1986 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>IPTV Panel — Admin</title>
+  <style>
+    :root {
+      --bg-deep: #0d1117;
+      --bg-panel: #161b22;
+      --bg-elevated: #1c2128;
+      --bg-hover: #252c36;
+      --border: #30363d;
+      --text: #e6edf3;
+      --text-muted: #8b949e;
+      --accent: #388bfd;
+      --accent-dim: #1f6feb;
+      --success: #3fb950;
+      --danger: #f85149;
+      --warning: #d29922;
+      --sidebar-w: 260px;
+      --top-h: 56px;
+      --radius: 10px;
+      --font: "Segoe UI", system-ui, -apple-system, sans-serif;
+    }
+    *, *::before, *::after { box-sizing: border-box; }
+    html, body { height: 100%; margin: 0; font-family: var(--font); background: var(--bg-deep); color: var(--text); }
+    a { color: var(--accent); }
+    button, input, select, textarea { font: inherit; color: inherit; }
+    input, select, textarea {
+      background: var(--bg-deep); border: 1px solid var(--border); border-radius: 8px;
+      padding: 0.5rem 0.75rem; width: 100%;
+    }
+    input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent-dim); border-color: var(--accent); }
+    .btn {
+      display: inline-flex; align-items: center; justify-content: center; gap: 0.35rem;
+      padding: 0.45rem 1rem; border-radius: 8px; border: 1px solid var(--border);
+      background: var(--bg-elevated); cursor: pointer; font-size: 0.875rem;
+    }
+    .btn:hover { background: var(--bg-hover); }
+    .btn-primary { background: var(--accent-dim); border-color: var(--accent); color: #fff; }
+    .btn-primary:hover { filter: brightness(1.08); }
+    .btn-danger { background: rgba(248,81,73,0.15); border-color: var(--danger); color: var(--danger); }
+    .btn-ghost { background: transparent; }
+    .btn-sm { padding: 0.25rem 0.6rem; font-size: 0.8rem; }
+    #login-screen {
+      min-height: 100vh; display: flex; align-items: center; justify-content: center;
+      background: radial-gradient(ellipse 80% 60% at 50% -20%, rgba(56,139,253,0.25), transparent), var(--bg-deep);
+    }
+    .login-card {
+      width: 100%; max-width: 400px; padding: 2rem; background: var(--bg-panel);
+      border: 1px solid var(--border); border-radius: var(--radius); box-shadow: 0 24px 48px rgba(0,0,0,0.45);
+    }
+    .login-card h1 { margin: 0 0 0.25rem; font-size: 1.5rem; }
+    .login-card p { margin: 0 0 1.5rem; color: var(--text-muted); font-size: 0.9rem; }
+    .field { margin-bottom: 1rem; }
+    .field label { display: block; font-size: 0.8rem; color: var(--text-muted); margin-bottom: 0.35rem; }
+    #app { display: none; min-height: 100vh; }
+    #app.visible { display: block; }
+    .layout { display: flex; min-height: 100vh; }
+    .sidebar {
+      width: var(--sidebar-w); flex-shrink: 0; background: var(--bg-panel);
+      border-right: 1px solid var(--border); display: flex; flex-direction: column;
+      position: fixed; top: 0; left: 0; bottom: 0; z-index: 40;
+    }
+    .sidebar-brand {
+      padding: 1.25rem 1rem; border-bottom: 1px solid var(--border);
+      font-weight: 700; font-size: 1.05rem; letter-spacing: 0.02em;
+    }
+    .sidebar-brand span { color: var(--accent); }
+    .nav-scroll { flex: 1; overflow-y: auto; padding: 0.75rem 0; }
+    .nav-item {
+      display: flex; align-items: center; gap: 0.65rem; padding: 0.65rem 1.25rem;
+      color: var(--text-muted); cursor: pointer; border-left: 3px solid transparent;
+      font-size: 0.9rem;
+    }
+    .nav-item:hover { background: var(--bg-hover); color: var(--text); }
+    .nav-item.active { background: rgba(56,139,253,0.12); color: var(--accent); border-left-color: var(--accent); }
+    .nav-icon { width: 1.5rem; text-align: center; font-size: 1.1rem; }
+    .main-wrap { flex: 1; margin-left: var(--sidebar-w); display: flex; flex-direction: column; min-width: 0; }
+    .topbar {
+      height: var(--top-h); flex-shrink: 0; display: flex; align-items: center; justify-content: space-between;
+      padding: 0 1.5rem; background: var(--bg-panel); border-bottom: 1px solid var(--border);
+      position: sticky; top: 0; z-index: 30;
+    }
+    .breadcrumb { font-size: 0.85rem; color: var(--text-muted); }
+    .breadcrumb strong { color: var(--text); }
+    .user-menu { display: flex; align-items: center; gap: 1rem; font-size: 0.875rem; }
+    .content { padding: 1.5rem; flex: 1; }
+    .page-title { font-size: 1.35rem; margin: 0 0 1rem; font-weight: 600; }
+    .toolbar {
+      display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: center; margin-bottom: 1rem;
+    }
+    .stats-grid {
+      display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 1rem; margin-bottom: 1.5rem;
+    }
+    .stat-card {
+      background: var(--bg-panel); border: 1px solid var(--border); border-radius: var(--radius);
+      padding: 1.1rem; position: relative; overflow: hidden;
+    }
+    .stat-card::before {
+      content: ""; position: absolute; top: 0; left: 0; right: 0; height: 3px;
+      background: linear-gradient(90deg, var(--accent), var(--accent-dim));
+      opacity: 0.85;
+    }
+    .stat-card .val { font-size: 1.65rem; font-weight: 700; line-height: 1.2; }
+    .stat-card .lbl { color: var(--text-muted); font-size: 0.8rem; margin-top: 0.25rem; }
+    .table-wrap {
+      background: var(--bg-panel); border: 1px solid var(--border); border-radius: var(--radius);
+      overflow: auto; max-width: 100%;
+    }
+    table.data-table { width: 100%; border-collapse: collapse; font-size: 0.875rem; }
+    .data-table th, .data-table td { padding: 0.65rem 0.85rem; text-align: left; border-bottom: 1px solid var(--border); }
+    .data-table th { background: var(--bg-elevated); color: var(--text-muted); font-weight: 600; white-space: nowrap; }
+    .data-table tr:hover td { background: rgba(255,255,255,0.02); }
+    .data-table .mono { font-family: ui-monospace, monospace; font-size: 0.8rem; }
+    .badge { display: inline-block; padding: 0.15rem 0.45rem; border-radius: 4px; font-size: 0.75rem; font-weight: 600; }
+    .badge-on { background: rgba(63,185,80,0.2); color: var(--success); }
+    .badge-off { background: rgba(248,81,73,0.15); color: var(--danger); }
+    .actions { display: flex; flex-wrap: wrap; gap: 0.35rem; }
+    .pagination {
+      display: flex; align-items: center; justify-content: flex-end; gap: 0.5rem; margin-top: 1rem; flex-wrap: wrap;
+    }
+    .batch-bar {
+      display: none; align-items: center; gap: 0.75rem; padding: 0.75rem 1rem;
+      background: rgba(56,139,253,0.12); border: 1px solid var(--accent-dim); border-radius: var(--radius); margin-bottom: 1rem;
+    }
+    .batch-bar.visible { display: flex; }
+    .tabs { display: flex; gap: 0.25rem; margin-bottom: 1rem; border-bottom: 1px solid var(--border); }
+    .tab {
+      padding: 0.6rem 1rem; cursor: pointer; color: var(--text-muted); border-bottom: 2px solid transparent; margin-bottom: -1px;
+    }
+    .tab.active { color: var(--accent); border-bottom-color: var(--accent); font-weight: 600; }
+    .modal-overlay {
+      display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.65); z-index: 100;
+      align-items: center; justify-content: center; padding: 1rem;
+    }
+    .modal-overlay.open { display: flex; }
+    .modal {
+      background: var(--bg-panel); border: 1px solid var(--border); border-radius: var(--radius);
+      width: 100%; max-width: 560px; max-height: 90vh; overflow: hidden; display: flex; flex-direction: column;
+      box-shadow: 0 24px 64px rgba(0,0,0,0.5);
+    }
+    .modal.wide { max-width: 720px; }
+    .modal-header { padding: 1rem 1.25rem; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; }
+    .modal-header h2 { margin: 0; font-size: 1.1rem; }
+    .modal-body { padding: 1.25rem; overflow-y: auto; flex: 1; }
+    .modal-footer { padding: 1rem 1.25rem; border-top: 1px solid var(--border); display: flex; justify-content: flex-end; gap: 0.5rem; }
+    .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; }
+    .form-grid .full { grid-column: 1 / -1; }
+    @media (max-width: 640px) { .form-grid { grid-template-columns: 1fr; } }
+    .toasts { position: fixed; bottom: 1.25rem; right: 1.25rem; z-index: 200; display: flex; flex-direction: column; gap: 0.5rem; max-width: 360px; }
+    .toast {
+      padding: 0.85rem 1rem; border-radius: 8px; border: 1px solid var(--border);
+      background: var(--bg-elevated); box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+      animation: slideIn 0.2s ease;
+    }
+    .toast.ok { border-color: var(--success); }
+    .toast.err { border-color: var(--danger); }
+    @keyframes slideIn { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+    .empty-state { text-align: center; padding: 2rem; color: var(--text-muted); }
+    .sidebar-toggle { display: none; }
+    @media (max-width: 900px) {
+      .sidebar { transform: translateX(-100%); transition: transform 0.2s; }
+      .sidebar.open { transform: translateX(0); }
+      .main-wrap { margin-left: 0; }
+      .sidebar-toggle { display: inline-flex; }
+    }
+  </style>
+</head>
+<body>
+  <div id="login-screen">
+    <div class="login-card">
+      <h1>IPTV <span style="color:var(--accent)">Admin</span></h1>
+      <p>Sign in with an administrator account.</p>
+      <form id="login-form">
+        <div class="field"><label>Username</label><input name="username" autocomplete="username" required /></div>
+        <div class="field"><label>Password</label><input name="password" type="password" autocomplete="current-password" required /></div>
+        <button type="submit" class="btn btn-primary" style="width:100%">Login</button>
+      </form>
+    </div>
+  </div>
+
+  <div id="app">
+    <div class="layout">
+      <aside class="sidebar" id="sidebar">
+        <div class="sidebar-brand">IPTV <span>Panel</span></div>
+        <nav class="nav-scroll" id="main-nav"></nav>
+      </aside>
+      <div class="main-wrap">
+        <header class="topbar">
+          <div style="display:flex;align-items:center;gap:1rem">
+            <button type="button" class="btn btn-ghost sidebar-toggle" id="btn-sidebar">☰</button>
+            <div class="breadcrumb" id="breadcrumb"></div>
+          </div>
+          <div class="user-menu">
+            <span id="top-username"></span>
+            <button type="button" class="btn btn-sm" id="btn-logout">Logout</button>
+          </div>
+        </header>
+        <main class="content" id="main-content"></main>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-overlay" id="modal-form">
+    <div class="modal wide" role="dialog">
+      <div class="modal-header"><h2 id="modal-form-title">Edit</h2><button type="button" class="btn btn-ghost btn-sm" data-close-modal>✕</button></div>
+      <div class="modal-body" id="modal-form-body"></div>
+      <div class="modal-footer">
+        <button type="button" class="btn" data-close-modal>Cancel</button>
+        <button type="button" class="btn btn-primary" id="modal-form-save">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-overlay" id="modal-confirm">
+    <div class="modal" role="dialog">
+      <div class="modal-header"><h2>Confirm</h2><button type="button" class="btn btn-ghost btn-sm" data-close-confirm>✕</button></div>
+      <div class="modal-body" id="modal-confirm-msg"></div>
+      <div class="modal-footer">
+        <button type="button" class="btn" data-close-confirm>Cancel</button>
+        <button type="button" class="btn btn-danger" id="modal-confirm-ok">Delete</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="toasts" id="toasts" aria-live="polite"></div>
+
+  <script>
+(function () {
+  const API = "/api/admin";
+  const LS = { access: "iptv_admin_access", refresh: "iptv_admin_refresh", user: "iptv_admin_username" };
+
+  const NAV = [
+    { id: "dashboard", label: "Dashboard", icon: "📊" },
+    { id: "streams", label: "Streams", icon: "📡" },
+    { id: "users", label: "Users", icon: "👤" },
+    { id: "vod", label: "VOD", icon: "🎬" },
+    { id: "categories", label: "Categories", icon: "📁" },
+    { id: "bouquets", label: "Bouquets", icon: "💐" },
+    { id: "servers", label: "Servers", icon: "🖥️" },
+    { id: "epg", label: "EPG", icon: "📅" },
+    { id: "devices", label: "Devices (MAG/E2)", icon: "📺" },
+    { id: "providers", label: "Providers", icon: "🌐" },
+    { id: "resellers", label: "Resellers", icon: "🏪" },
+    { id: "packages", label: "Packages", icon: "📦" },
+    { id: "lines", label: "Lines / Connections", icon: "🔗" },
+    { id: "tools", label: "Tools", icon: "🔧" },
+    { id: "security", label: "Security", icon: "🛡️" },
+    { id: "logs", label: "Logs", icon: "📋" },
+    { id: "backups", label: "Backups", icon: "💾" },
+    { id: "diagnostics", label: "Diagnostics", icon: "🔬" },
+    { id: "tickets", label: "Tickets", icon: "🎫" },
+    { id: "settings", label: "Settings", icon: "⚙️" }
+  ];
+
+  const state = {
+    section: "dashboard",
+    page: 1,
+    perPage: 25,
+    vodTab: "movies",
+    selected: new Set(),
+    batchEntity: null,
+    modalSaveHandler: null,
+    confirmHandler: null,
+    categoriesCache: [],
+    serversCache: [],
+    seriesForEpisodes: null
+  };
+
+  const $ = (s, r = document) => r.querySelector(s);
+  const $$ = (s, r = document) => [...r.querySelectorAll(s)];
+
+  function toast(msg, type) {
+    const el = document.createElement("div");
+    el.className = "toast " + (type === "error" ? "err" : "ok");
+    el.textContent = msg;
+    $("#toasts").appendChild(el);
+    setTimeout(() => { el.remove(); }, 4200);
+  }
+
+  function getToken() { return localStorage.getItem(LS.access); }
+
+  async function api(path, opts = {}) {
+    const headers = Object.assign({ "Content-Type": "application/json" }, opts.headers || {});
+    const t = getToken();
+    if (t) headers.Authorization = "Bearer " + t;
+    const res = await fetch(API + path, Object.assign({}, opts, { headers }));
+    const text = await res.text();
+    let data = null;
+    try { data = text ? JSON.parse(text) : null; } catch (_) { data = text; }
+    if (res.status === 401) {
+      logout();
+      toast("Session expired. Please login again.", "error");
+      throw new Error("unauthorized");
+    }
+    if (!res.ok) {
+      const detail = (data && data.detail) ? (typeof data.detail === "string" ? data.detail : JSON.stringify(data.detail)) : (text || res.statusText);
+      throw new Error(detail || "Request failed");
+    }
+    return data;
+  }
+
+  function showApp(on) {
+    $("#login-screen").style.display = on ? "none" : "flex";
+    $("#app").classList.toggle("visible", on);
+  }
+
+  function logout() {
+    localStorage.removeItem(LS.access);
+    localStorage.removeItem(LS.refresh);
+    localStorage.removeItem(LS.user);
+    showApp(false);
+  }
+
+  function setBreadcrumb() {
+    const item = NAV.find((n) => n.id === state.section);
+    $("#breadcrumb").innerHTML = "Admin / <strong>" + (item ? item.label : state.section) + "</strong>";
+  }
+
+  function openModalForm(title, bodyHtml, onSave) {
+    $("#modal-form-title").textContent = title;
+    $("#modal-form-body").innerHTML = bodyHtml;
+    $("#modal-form").classList.add("open");
+    state.modalSaveHandler = onSave;
+  }
+
+  function closeModalForm() {
+    $("#modal-form").classList.remove("open");
+    state.modalSaveHandler = null;
+    const sb = $("#modal-form-save");
+    if (sb) { sb.style.display = ""; sb.textContent = "Save"; sb.onclick = null; }
+  }
+
+  function openConfirm(msg, onOk) {
+    $("#modal-confirm-msg").textContent = msg;
+    $("#modal-confirm").classList.add("open");
+    state.confirmHandler = onOk;
+  }
+
+  function closeConfirm() {
+    $("#modal-confirm").classList.remove("open");
+    state.confirmHandler = null;
+  }
+
+  function esc(s) {
+    if (s == null) return "";
+    return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/"/g, "&quot;");
+  }
+
+  function paginationHtml(total) {
+    const pages = Math.max(1, Math.ceil(total / state.perPage) || 1);
+    const p = Math.min(state.page, pages);
+    return '<div class="pagination">' +
+      '<span style="color:var(--text-muted);font-size:0.85rem">' + total + " total</span>" +
+      '<button type="button" class="btn btn-sm" data-page="prev"' + (p <= 1 ? " disabled" : "") + ">Prev</button>" +
+      "<span>Page " + p + " / " + pages + "</span>" +
+      '<button type="button" class="btn btn-sm" data-page="next"' + (p >= pages ? " disabled" : "") + ">Next</button>" +
+      '<label style="display:flex;align-items:center;gap:0.35rem;font-size:0.85rem;color:var(--text-muted)">Per page ' +
+      '<select id="per-page-sel" style="width:auto">' +
+      [10, 25, 50, 100].map((n) => '<option value="' + n + '"' + (n === state.perPage ? " selected" : "") + ">" + n + "</option>").join("") +
+      "</select></label></div>";
+  }
+
+  function bindPagination(onChange) {
+    $$("[data-page]").forEach((b) => b.addEventListener("click", () => {
+      const pages = Math.max(1, Math.ceil(onChange.total / state.perPage));
+      if (b.dataset.page === "prev") state.page = Math.max(1, state.page - 1);
+      if (b.dataset.page === "next") state.page = Math.min(pages, state.page + 1);
+      onChange.load();
+    }));
+    const sel = $("#per-page-sel");
+    if (sel) sel.addEventListener("change", () => { state.perPage = +sel.value; state.page = 1; onChange.load(); });
+  }
+
+  function clearSelection() {
+    state.selected.clear();
+    state.batchEntity = null;
+    $(".batch-bar") && ($(".batch-bar").classList.remove("visible"), $(".batch-bar").innerHTML = "");
+  }
+
+  function updateBatchBar(entity, label) {
+    let bar = $(".batch-bar");
+    if (!bar) {
+      bar = document.createElement("div");
+      bar.className = "batch-bar";
+      $("#main-content").insertBefore(bar, $("#main-content").firstChild.nextSibling);
+    }
+    state.batchEntity = entity;
+    const n = state.selected.size;
+    bar.classList.toggle("visible", n > 0);
+    bar.innerHTML = n ? '<span><strong>' + n + "</strong> " + label + ' selected</span>' +
+      '<button type="button" class="btn btn-sm btn-primary" data-batch="enable">Enable</button>' +
+      '<button type="button" class="btn btn-sm" data-batch="disable">Disable</button>' +
+      '<button type="button" class="btn btn-sm btn-danger" data-batch="delete">Delete</button>' +
+      '<button type="button" class="btn btn-sm btn-ghost" data-batch="clear">Clear</button>' : "";
+    $$("[data-batch]", bar).forEach((btn) => btn.addEventListener("click", () => batchAction(btn.dataset.batch)));
+  }
+
+  async function batchAction(action) {
+    const ids = [...state.selected];
+    if (!ids.length) return;
+    try {
+      if (action === "clear") { clearSelection(); render(); return; }
+      if (action === "delete") {
+        openConfirm("Delete " + ids.length + " item(s)? This cannot be undone.", async () => {
+          closeConfirm();
+          const path = state.batchEntity === "streams" ? "/streams/batch/delete" : "/users/batch/delete";
+          await api(path, { method: "POST", body: JSON.stringify({ ids }) });
+          toast("Deleted " + ids.length + " items");
+          clearSelection();
+          render();
+        });
+        return;
+      }
+      const path = state.batchEntity === "streams"
+        ? (action === "enable" ? "/streams/batch/enable" : "/streams/batch/disable")
+        : (action === "enable" ? "/users/batch/enable" : "/users/batch/disable");
+      const r = await api(path, { method: "POST", body: JSON.stringify({ ids }) });
+      toast("Updated: " + (r.affected != null ? r.affected : ids.length));
+      clearSelection();
+      render();
+    } catch (e) { toast(e.message, "error"); }
+  }
+
+  async function loadCategories() {
+    try {
+      const r = await api("/categories?per_page=500&page=1");
+      state.categoriesCache = r.items || [];
+    } catch (_) { state.categoriesCache = []; }
+  }
+
+  async function loadServers() {
+    try { state.serversCache = await api("/servers"); } catch (_) { state.serversCache = []; }
+  }
+
+  function categoryOptions(selectedId) {
+    return '<option value="">—</option>' + state.categoriesCache.map((c) =>
+      '<option value="' + c.id + '"' + (c.id === selectedId ? " selected" : "") + ">" + esc(c.category_name) + " (" + esc(c.category_type) + ")</option>"
+    ).join("");
+  }
+
+  /* ——— Dashboard ——— */
+  async function renderDashboard() {
+    $("#main-content").innerHTML = '<h1 class="page-title">Dashboard</h1><div class="stats-grid" id="dash-stats"></div>';
+    try {
+      const s = await api("/dashboard/summary");
+      const cards = [];
+      const flat = (obj, prefix) => {
+        if (obj == null) return;
+        if (typeof obj !== "object") {
+          cards.push({ label: prefix, val: obj });
+          return;
+        }
+        for (const k of Object.keys(obj)) {
+          const v = obj[k];
+          const key = prefix ? prefix + " · " + k : k;
+          if (v != null && typeof v === "object" && !Array.isArray(v)) flat(v, key);
+          else cards.push({ label: key.replace(/_/g, " "), val: v });
+        }
+      };
+      flat(s, "");
+      $("#dash-stats").innerHTML = cards.map((c) =>
+        '<div class="stat-card"><div class="val">' + esc(c.val) + '</div><div class="lbl">' + esc(c.label) + "</div></div>"
+      ).join("") || '<p class="empty-state">No stats</p>';
+    } catch (e) {
+      $("#dash-stats").innerHTML = '<p class="empty-state">' + esc(e.message) + "</p>";
+    }
+  }
+
+  /* ——— Streams ——— */
+  async function renderStreams() {
+    clearSelection();
+    $("#main-content").innerHTML =
+      '<h1 class="page-title">Streams</h1><div class="toolbar">' +
+      '<input type="search" id="stream-search" placeholder="Search…" style="max-width:220px" />' +
+      '<select id="stream-cat" style="max-width:160px"><option value="">Loading…</option></select>' +
+      '<select id="stream-en" style="width:auto"><option value="">Any status</option><option value="true">Enabled</option><option value="false">Disabled</option></select>' +
+      '<button type="button" class="btn btn-primary" id="btn-stream-search">Search</button>' +
+      '<button type="button" class="btn" id="btn-stream-new">+ New stream</button></div>' +
+      '<div class="table-wrap"><table class="data-table"><thead><tr>' +
+      '<th><input type="checkbox" id="chk-all" /></th><th>ID</th><th>Name</th><th>Category</th><th>Enabled</th><th>Actions</th></tr></thead><tbody id="tbody"></tbody></table></div>' +
+      paginationHtml(0);
+
+    async function load() {
+      let items, total;
+      const searchVal = $("#stream-search").value.trim();
+      try {
+        if (searchVal) {
+          items = await api("/streams/search?q=" + encodeURIComponent(searchVal));
+          total = items.length;
+          const start = (state.page - 1) * state.perPage;
+          items = items.slice(start, start + state.perPage);
+        } else {
+          const params = new URLSearchParams({ page: state.page, per_page: state.perPage });
+          const cid = $("#stream-cat").value;
+          const enVal = $("#stream-en").value;
+          if (cid) params.set("category_id", cid);
+          if (enVal) params.set("enabled", enVal);
+          const r = await api("/streams?" + params);
+          items = r.items; total = r.total;
+        }
+        $("#tbody").innerHTML = items.map((row) => {
+          const cat = state.categoriesCache.find((c) => c.id === row.category_id);
+          return "<tr>" +
+            '<td><input type="checkbox" class="row-chk" data-id="' + row.id + '"' + (state.selected.has(row.id) ? " checked" : "") + " /></td>" +
+            "<td>" + row.id + "</td><td>" + esc(row.stream_display_name) + "</td><td>" + esc(cat ? cat.category_name : row.category_id) + "</td>" +
+            "<td>" + (row.enabled ? '<span class="badge badge-on">On</span>' : '<span class="badge badge-off">Off</span>') + "</td>" +
+            '<td class="actions"><button type="button" class="btn btn-sm" data-edit="' + row.id + '">Edit</button> ' +
+            '<button type="button" class="btn btn-sm" data-toggle="' + row.id + '">Toggle</button> ' +
+            '<button type="button" class="btn btn-sm" data-start="' + row.id + '" title="Start stream">&#9654;</button> ' +
+            '<button type="button" class="btn btn-sm" data-stop="' + row.id + '" title="Stop stream">&#9632;</button> ' +
+            '<button type="button" class="btn btn-sm" data-restart="' + row.id + '" title="Restart stream">&#8635;</button> ' +
+            '<button type="button" class="btn btn-sm btn-danger" data-del="' + row.id + '">Delete</button></td></tr>';
+        }).join("") || '<tr><td colspan="6" class="empty-state">No streams</td></tr>';
+
+        $(".pagination").outerHTML = paginationHtml(total);
+        bindPagination({ total, load });
+
+        $("#chk-all").onchange = () => {
+          const on = $("#chk-all").checked;
+          items.forEach((row) => { if (on) state.selected.add(row.id); else state.selected.delete(row.id); });
+          $$(".row-chk").forEach((cb) => { cb.checked = on; });
+          updateBatchBar("streams", "streams");
+        };
+        $$(".row-chk").forEach((cb) => {
+          cb.onchange = () => { cb.checked ? state.selected.add(+cb.dataset.id) : state.selected.delete(+cb.dataset.id); updateBatchBar("streams", "streams"); };
+        });
+        updateBatchBar("streams", "streams");
+
+        $$("[data-edit]").forEach((b) => b.onclick = () => editStream(+b.dataset.edit));
+        $$("[data-toggle]").forEach((b) => b.onclick = async () => {
+          try { await api("/streams/" + b.dataset.toggle + "/toggle", { method: "POST", body: "{}" }); toast("Toggled"); load(); } catch (e) { toast(e.message, "error"); }
+        });
+        $$("[data-del]").forEach((b) => b.onclick = () => delStream(+b.dataset.del, load));
+        $$("[data-start]").forEach((b) => b.onclick = async () => {
+          try { await api("/streams/" + b.dataset.start + "/start", { method: "POST", body: "{}" }); toast("Stream started"); } catch (e) { toast(e.message, "error"); }
+        });
+        $$("[data-stop]").forEach((b) => b.onclick = async () => {
+          try { await api("/streams/" + b.dataset.stop + "/stop", { method: "POST", body: "{}" }); toast("Stream stopped"); } catch (e) { toast(e.message, "error"); }
+        });
+        $$("[data-restart]").forEach((b) => b.onclick = async () => {
+          try { await api("/streams/" + b.dataset.restart + "/restart", { method: "POST", body: "{}" }); toast("Stream restarted"); } catch (e) { toast(e.message, "error"); }
+        });
+      } catch (e) { $("#tbody").innerHTML = '<tr><td colspan="6">' + esc(e.message) + "</td></tr>"; }
+    }
+
+    $("#btn-stream-search").onclick = () => { state.page = 1; load(); };
+    $("#btn-stream-new").onclick = () => editStream(null);
+    await loadCategories();
+    $("#stream-cat").innerHTML = '<option value="">All categories</option>' + categoryOptions().replace(/^<option value="">—<\/option>/, "");
+    await load();
+  }
+
+  function editStream(id) {
+    const isNew = id == null;
+    openModalForm(isNew ? "New stream" : "Edit stream #" + id, "", null);
+    const body = $("#modal-form-body");
+    body.innerHTML =
+      '<div class="form-grid">' +
+      '<div class="full field"><label>Display name *</label><input name="stream_display_name" required /></div>' +
+      '<div class="full field"><label>Source URL</label><input name="stream_source" /></div>' +
+      '<div class="field"><label>Icon URL</label><input name="stream_icon" /></div>' +
+      '<div class="field"><label>EPG channel ID</label><input name="epg_channel_id" /></div>' +
+      '<div class="field"><label>Category</label><select name="category_id">' + categoryOptions() + "</select></div>" +
+      '<div class="field"><label>Stream type</label><input name="stream_type" type="number" value="1" /></div>' +
+      '<div class="field"><label>Target container</label><input name="target_container" value="ts" /></div>' +
+      '<div class="field"><label>Notes</label><input name="notes" /></div>' +
+      '<div class="field"><label><input type="checkbox" name="enabled" checked /> Enabled</label></div>' +
+      '<div class="field"><label><input type="checkbox" name="direct_source" /> Direct source</label></div>' +
+      '<div class="field"><label><input type="checkbox" name="read_native" /> Read native (-re)</label></div>' +
+      '<div class="field"><label><input type="checkbox" name="stream_all" /> Transcode all</label></div>' +
+      '<div class="field"><label><input type="checkbox" name="allow_record" /> Allow record</label></div>' +
+      '<div class="field"><label><input type="checkbox" name="tv_archive" /> TV archive</label></div>' +
+      '<div class="field"><label>Archive duration (days)</label><input name="tv_archive_duration" type="number" value="0" /></div>' +
+      '<div class="field"><label>Archive server ID</label><input name="tv_archive_server_id" type="number" /></div>' +
+      '<div class="field"><label>Order</label><input name="order" type="number" value="0" /></div>' +
+      '<div class="full field"><label>Custom FFmpeg params</label><input name="custom_ffmpeg" placeholder="-c:v libx264 -preset fast" /></div>' +
+      '<div class="field"><label>Custom SID</label><input name="custom_sid" /></div>' +
+      '<div class="field"><label>Probed resolution</label><input name="probed_resolution" readonly style="opacity:0.6" /></div>' +
+      '<div style="text-align:right;grid-column:1/-1;margin-top:0.5rem">' +
+      '<button type="button" class="btn btn-sm" id="btn-probe-stream">Probe source</button> ' +
+      '<button type="button" class="btn btn-sm" id="btn-stream-status">Check status</button></div></div>';
+
+    const fill = (row) => {
+      for (const el of $$("[name]", body)) {
+        const n = el.name;
+        if (el.type === "checkbox") el.checked = !!row[n];
+        else if (row[n] != null) el.value = row[n];
+      }
+    };
+
+    (async () => {
+      if (!isNew) {
+        try { fill(await api("/streams/" + id)); } catch (e) { toast(e.message, "error"); closeModalForm(); return; }
+      }
+    })();
+
+    $("#modal-form-save").onclick = async () => {
+      const get = (n) => {
+        const el = body.querySelector("[name=\"" + n + "\"]");
+        if (!el) return undefined;
+        if (el.type === "checkbox") return el.checked;
+        if (el.type === "number") return el.value === "" ? null : +el.value;
+        const v = el.value.trim();
+        if (n === "category_id" && v === "") return null;
+        return v === "" ? null : v;
+      };
+      const payload = {
+        stream_display_name: get("stream_display_name"),
+        stream_source: get("stream_source"),
+        stream_icon: get("stream_icon"),
+        epg_channel_id: get("epg_channel_id"),
+        category_id: get("category_id") != null && get("category_id") !== "" ? +get("category_id") : get("category_id"),
+        stream_type: get("stream_type"),
+        enabled: get("enabled"),
+        direct_source: get("direct_source"),
+        read_native: get("read_native"),
+        stream_all: get("stream_all"),
+        allow_record: get("allow_record"),
+        notes: get("notes"),
+        target_container: get("target_container"),
+        tv_archive: get("tv_archive"),
+        tv_archive_duration: get("tv_archive_duration"),
+        tv_archive_server_id: get("tv_archive_server_id"),
+        order: get("order"),
+        custom_ffmpeg: get("custom_ffmpeg"),
+        custom_sid: get("custom_sid")
+      };
+      if (!payload.stream_display_name) { toast("Name required", "error"); return; }
+      try {
+        if (isNew) await api("/streams", { method: "POST", body: JSON.stringify(payload) });
+        else await api("/streams/" + id, { method: "PUT", body: JSON.stringify(payload) });
+        toast("Saved"); closeModalForm(); render();
+      } catch (e) { toast(e.message, "error"); }
+    };
+
+    const probBtn = body.querySelector("#btn-probe-stream");
+    if (probBtn) probBtn.onclick = async () => {
+      const url = body.querySelector("[name=stream_source]").value.trim();
+      if (!url) { toast("Enter a source URL first", "error"); return; }
+      toast("Probing...");
+      try {
+        const r = id ? await api("/streams/" + id + "/probe", { method: "POST", body: JSON.stringify({ url }) }) : await api("/streams/1/probe", { method: "POST", body: JSON.stringify({ url }) });
+        const res = body.querySelector("[name=probed_resolution]");
+        if (r.probe_result && r.probe_result.streams) {
+          const vs = r.probe_result.streams.find((s) => s.codec_type === "video");
+          if (vs) res.value = vs.width + "x" + vs.height;
+          else res.value = "No video stream";
+        } else res.value = "Probe returned no data";
+        toast("Probe complete");
+      } catch (e) { toast(e.message, "error"); }
+    };
+    const statusBtn = body.querySelector("#btn-stream-status");
+    if (statusBtn && id) statusBtn.onclick = async () => {
+      try {
+        const r = await api("/streams/" + id + "/status");
+        toast("Stream " + id + ": " + (r.running ? "RUNNING (PID " + r.pid + ")" : "STOPPED"));
+      } catch (e) { toast(e.message, "error"); }
+    };
+  }
+
+  function delStream(id, cb) {
+    openConfirm("Delete stream #" + id + "?", async () => {
+      try { await api("/streams/" + id, { method: "DELETE" }); closeConfirm(); toast("Deleted"); cb(); } catch (e) { toast(e.message, "error"); }
+    });
+  }
+
+  /* ——— Users ——— */
+  async function renderUsers() {
+    clearSelection();
+    $("#main-content").innerHTML =
+      '<h1 class="page-title">Users</h1><div class="toolbar">' +
+      '<input type="search" id="user-search" placeholder="Search username…" style="max-width:220px" />' +
+      '<select id="user-en" style="width:auto"><option value="">Any status</option><option value="true">Enabled</option><option value="false">Disabled</option></select>' +
+      '<button type="button" class="btn btn-primary" id="btn-user-go">Apply</button>' +
+      '<button type="button" class="btn" id="btn-user-new">+ New user</button></div>' +
+      '<div class="table-wrap"><table class="data-table"><thead><tr>' +
+      '<th><input type="checkbox" id="chk-all-u" /></th><th>ID</th><th>Username</th><th>Max conn</th><th>Expires</th><th>Enabled</th><th>Actions</th></tr></thead><tbody id="tbody"></tbody></table></div>' +
+      paginationHtml(0);
+
+    async function load() {
+      const params = new URLSearchParams({ page: state.page, per_page: state.perPage });
+      const s = $("#user-search").value.trim();
+      const en = $("#user-en").value;
+      if (s) params.set("search", s);
+      if (en) params.set("enabled", en);
+      try {
+        const r = await api("/users?" + params);
+        const items = r.items;
+        $("#tbody").innerHTML = items.map((row) =>
+          "<tr>" +
+          '<td><input type="checkbox" class="row-chk-u" data-id="' + row.id + '"' + (state.selected.has(row.id) ? " checked" : "") + " /></td>" +
+          "<td>" + row.id + "</td><td>" + esc(row.username) + "</td><td>" + row.max_connections + "</td><td class=\"mono\">" + esc(row.exp_date || "—") + "</td>" +
+          "<td>" + (row.enabled ? '<span class="badge badge-on">On</span>' : '<span class="badge badge-off">Off</span>') + "</td>" +
+          '<td class="actions"><button type="button" class="btn btn-sm" data-edit="' + row.id + '">Edit</button> ' +
+          '<button type="button" class="btn btn-sm" data-toggle="' + row.id + '">Toggle</button> ' +
+          '<button type="button" class="btn btn-sm btn-danger" data-del="' + row.id + '">Delete</button></td></tr>'
+        ).join("") || '<tr><td colspan="7" class="empty-state">No users</td></tr>';
+
+        $(".pagination").outerHTML = paginationHtml(r.total);
+        bindPagination({ total: r.total, load });
+
+        $("#chk-all-u").onchange = () => {
+          const on = $("#chk-all-u").checked;
+          items.forEach((row) => { if (on) state.selected.add(row.id); else state.selected.delete(row.id); });
+          $$(".row-chk-u").forEach((cb) => { cb.checked = on; });
+          updateBatchBar("users", "users");
+        };
+        $$(".row-chk-u").forEach((cb) => {
+          cb.onchange = () => { cb.checked ? state.selected.add(+cb.dataset.id) : state.selected.delete(+cb.dataset.id); updateBatchBar("users", "users"); };
+        });
+        updateBatchBar("users", "users");
+
+        $$("[data-edit]").forEach((b) => b.onclick = () => editUser(+b.dataset.edit));
+        $$("[data-toggle]").forEach((b) => b.onclick = async () => {
+          try { await api("/users/" + b.dataset.toggle + "/toggle", { method: "POST", body: "{}" }); toast("Toggled"); load(); } catch (e) { toast(e.message, "error"); }
+        });
+        $$("[data-del]").forEach((b) => b.onclick = () => delUser(+b.dataset.del, load));
+      } catch (e) { $("#tbody").innerHTML = '<tr><td colspan="7">' + esc(e.message) + "</td></tr>"; }
+    }
+    $("#btn-user-go").onclick = () => { state.page = 1; load(); };
+    $("#btn-user-new").onclick = () => editUser(null);
+    await load();
+  }
+
+  function editUser(id) {
+    const isNew = id == null;
+    openModalForm(isNew ? "New user" : "Edit user #" + id, "", null);
+    const body = $("#modal-form-body");
+    body.innerHTML =
+      '<div class="form-grid">' +
+      '<div class="field"><label>Username *</label><input name="username" required ' + (isNew ? "" : 'readonly style="opacity:0.7"') + " /></div>" +
+      '<div class="field"><label>Password ' + (isNew ? "*" : "(leave blank to keep)") + "</label><input name=\"password\" type=\"password\" " + (isNew ? "required" : "") + " /></div>" +
+      '<div class="field"><label>Max connections</label><input name="max_connections" type="number" value="1" /></div>' +
+      '<div class="field"><label>Expiry (ISO datetime)</label><input name="exp_date" placeholder="2026-12-31T23:59:59" /></div>' +
+      '<div class="field"><label>Bouquet</label><input name="bouquet" /></div>' +
+      '<div class="field"><label>Admin notes</label><input name="admin_notes" /></div>' +
+      '<div class="field"><label><input type="checkbox" name="enabled" checked /> Enabled</label></div>' +
+      '<div class="field"><label><input type="checkbox" name="is_trial" /> Trial</label></div>' +
+      '<div class="field"><label><input type="checkbox" name="is_restreamer" /> Restreamer</label></div>' +
+      '<div class="field"><label><input type="checkbox" name="is_mag" /> MAG</label></div>' +
+      '<div class="field"><label><input type="checkbox" name="is_stalker" /> Stalker</label></div>' +
+      '<div class="full field"><label>Allowed IPs (comma-separated, optional)</label><input name="allowed_ips" /></div>' +
+      '<div class="full field"><label>Allowed User Agents (comma-separated, optional)</label><input name="allowed_user_agents" /></div>' +
+      '<div class="full field"><label>Allowed output IDs (optional)</label><input name="allowed_output_ids" /></div>' +
+      '<div class="field"><label>Force server ID</label><input name="force_server_id" type="number" /></div>' +
+      '<div class="full field"><label>Reseller notes</label><input name="reseller_notes" /></div></div>';
+
+    (async () => {
+      if (!isNew) {
+        try {
+          const row = await api("/users/" + id);
+          for (const el of $$("[name]", body)) {
+            if (el.type === "checkbox") el.checked = !!row[el.name];
+            else if (row[el.name] != null) el.value = row[el.name];
+          }
+        } catch (e) { toast(e.message, "error"); closeModalForm(); }
+      }
+    })();
+
+    $("#modal-form-save").onclick = async () => {
+      const get = (n) => {
+        const el = body.querySelector("[name=\"" + n + "\"]");
+        if (!el) return undefined;
+        if (el.type === "checkbox") return el.checked;
+        if (el.type === "number") return +el.value;
+        const v = el.value.trim();
+        return v === "" ? null : v;
+      };
+      const payload = {
+        username: get("username"),
+        password: get("password"),
+        max_connections: get("max_connections"),
+        exp_date: get("exp_date"),
+        enabled: get("enabled"),
+        is_trial: get("is_trial"),
+        admin_notes: get("admin_notes"),
+        bouquet: get("bouquet"),
+        allowed_output_ids: get("allowed_output_ids"),
+        allowed_ips: get("allowed_ips"),
+        is_restreamer: get("is_restreamer"),
+        is_mag: get("is_mag"),
+        is_stalker: get("is_stalker"),
+        allowed_user_agents: get("allowed_user_agents"),
+        force_server_id: get("force_server_id") || null,
+        reseller_notes: get("reseller_notes")
+      };
+      if (isNew && !payload.password) { toast("Password required", "error"); return; }
+      if (!isNew && !payload.password) delete payload.password;
+      try {
+        if (isNew) await api("/users", { method: "POST", body: JSON.stringify(payload) });
+        else await api("/users/" + id, { method: "PUT", body: JSON.stringify(payload) });
+        toast("Saved"); closeModalForm(); render();
+      } catch (e) { toast(e.message, "error"); }
+    };
+  }
+
+  function delUser(id, cb) {
+    openConfirm("Delete user #" + id + "?", async () => {
+      try { await api("/users/" + id, { method: "DELETE" }); closeConfirm(); toast("Deleted"); cb(); } catch (e) { toast(e.message, "error"); }
+    });
+  }
+
+  /* ——— VOD ——— */
+  async function renderVod() {
+    $("#main-content").innerHTML =
+      '<h1 class="page-title">VOD</h1><div class="tabs">' +
+      '<div class="tab' + (state.vodTab === "movies" ? " active" : "") + '" data-vod="movies">Movies</div>' +
+      '<div class="tab' + (state.vodTab === "series" ? " active" : "") + '" data-vod="series">Series</div></div>' +
+      '<div id="vod-panel"></div>';
+    $$(".tab").forEach((t) => t.addEventListener("click", () => { state.vodTab = t.dataset.vod; state.page = 1; renderVod(); }));
+    if (state.vodTab === "movies") await renderMovies($("#vod-panel"));
+    else await renderSeriesPanel($("#vod-panel"));
+  }
+
+  async function renderMovies(container) {
+    container.innerHTML =
+      '<div class="toolbar"><input type="search" id="mov-search" placeholder="Search…" style="max-width:220px" />' +
+      '<select id="mov-cat" style="max-width:180px"><option value="">Loading…</option></select>' +
+      '<button type="button" class="btn btn-primary" id="mov-go">Apply</button>' +
+      '<button type="button" class="btn" id="mov-new">+ New movie</button></div>' +
+      '<div class="table-wrap"><table class="data-table"><thead><tr><th>ID</th><th>Title</th><th>Category</th><th>Container</th><th>Actions</th></tr></thead><tbody id="tbody"></tbody></table></div>' +
+      paginationHtml(0);
+
+    async function load() {
+      const params = new URLSearchParams({ page: state.page, per_page: state.perPage });
+      const s = $("#mov-search").value.trim();
+      const c = $("#mov-cat").value;
+      if (s) params.set("search", s);
+      if (c) params.set("category_id", c);
+      try {
+        const r = await api("/vod/movies?" + params);
+        $("#tbody").innerHTML = r.items.map((row) => {
+          const cat = state.categoriesCache.find((x) => x.id === row.category_id);
+          return "<tr><td>" + row.id + "</td><td>" + esc(row.stream_display_name) + "</td><td>" + esc(cat ? cat.category_name : row.category_id) + "</td><td>" + esc(row.container_extension) + "</td>" +
+            '<td class="actions"><button type="button" class="btn btn-sm" data-e="' + row.id + '">Edit</button> ' +
+            '<button type="button" class="btn btn-sm btn-danger" data-d="' + row.id + '">Delete</button></td></tr>';
+        }).join("") || '<tr><td colspan="5" class="empty-state">No movies</td></tr>';
+        $(".pagination").outerHTML = paginationHtml(r.total);
+        bindPagination({ total: r.total, load });
+        $$("[data-e]").forEach((b) => b.onclick = () => editMovie(+b.dataset.e));
+        $$("[data-d]").forEach((b) => b.onclick = () => openConfirm("Delete movie #" + b.dataset.d + "?", async () => {
+          try { await api("/vod/movies/" + b.dataset.d, { method: "DELETE" }); closeConfirm(); toast("Deleted"); load(); } catch (e) { toast(e.message, "error"); }
+        }));
+      } catch (e) { $("#tbody").innerHTML = '<tr><td colspan="5">' + esc(e.message) + "</td></tr>"; }
+    }
+    $("#mov-go").onclick = () => { state.page = 1; load(); };
+    $("#mov-new").onclick = () => editMovie(null);
+    await loadCategories();
+    $("#mov-cat").innerHTML = '<option value="">All categories</option>' + categoryOptions().replace(/^<option value="">—<\/option>/, "");
+    await load();
+  }
+
+  function editMovie(id) {
+    const isNew = id == null;
+    openModalForm(isNew ? "New movie" : "Edit movie", "", null);
+    const body = $("#modal-form-body");
+    body.innerHTML =
+      '<div class="form-grid">' +
+      '<div class="full field"><label>Title *</label><input name="stream_display_name" required /></div>' +
+      '<div class="full field"><label>Source</label><input name="stream_source" /></div>' +
+      '<div class="field"><label>Icon URL</label><input name="stream_icon" /></div>' +
+      '<div class="field"><label>Category</label><select name="category_id">' + categoryOptions() + "</select></div>" +
+      '<div class="field"><label>Container</label><input name="container_extension" value="mkv" /></div>' +
+      '<div class="field"><label>TMDB ID</label><input name="tmdb_id" type="number" /></div>' +
+      '<div class="full field"><label>Plot</label><textarea name="plot" rows="2"></textarea></div>' +
+      '<div class="field"><label>Genre</label><input name="genre" /></div>' +
+      '<div class="field"><label>Director</label><input name="director" /></div></div>';
+    (async () => {
+      if (!isNew) {
+        try {
+          const row = await api("/vod/movies/" + id);
+          for (const el of $$("[name]", body)) {
+            if (el.type === "checkbox") el.checked = !!row[el.name];
+            else if (row[el.name] != null && el.name !== "plot") el.value = row[el.name];
+            else if (el.name === "plot" && row.plot) el.value = row.plot;
+          }
+        } catch (e) { toast(e.message, "error"); closeModalForm(); }
+      }
+    })();
+    $("#modal-form-save").onclick = async () => {
+      const o = {};
+      for (const el of $$("[name]", body)) {
+        if (el.name === "category_id") {
+          o.category_id = el.value === "" ? null : +el.value;
+          continue;
+        }
+        if (el.name === "tmdb_id") { o.tmdb_id = el.value === "" ? null : +el.value; continue; }
+        const v = el.value.trim();
+        o[el.name] = v === "" ? null : v;
+      }
+      if (!o.stream_display_name) { toast("Title required", "error"); return; }
+      if (isNew && (o.stream_source == null || o.stream_source === "")) o.stream_source = "";
+      try {
+        if (isNew) await api("/vod/movies", { method: "POST", body: JSON.stringify(o) });
+        else await api("/vod/movies/" + id, { method: "PUT", body: JSON.stringify(o) });
+        toast("Saved"); closeModalForm(); render();
+      } catch (e) { toast(e.message, "error"); }
+    };
+  }
+
+  async function renderSeriesPanel(container) {
+    container.innerHTML =
+      '<div class="toolbar"><input type="search" id="ser-search" placeholder="Search…" style="max-width:220px" />' +
+      '<select id="ser-cat" style="max-width:180px"><option value="">Loading…</option></select>' +
+      '<button type="button" class="btn btn-primary" id="ser-go">Apply</button>' +
+      '<button type="button" class="btn" id="ser-new">+ New series</button></div>' +
+      '<div class="table-wrap"><table class="data-table"><thead><tr><th>ID</th><th>Title</th><th>Category</th><th>Actions</th></tr></thead><tbody id="tbody-s"></tbody></table></div>' +
+      paginationHtml(0);
+
+    async function load() {
+      const params = new URLSearchParams({ page: state.page, per_page: state.perPage });
+      const s = $("#ser-search").value.trim();
+      const c = $("#ser-cat").value;
+      if (s) params.set("search", s);
+      if (c) params.set("category_id", c);
+      try {
+        const r = await api("/vod/series?" + params);
+        $("#tbody-s").innerHTML = r.items.map((row) => {
+          const cat = state.categoriesCache.find((x) => x.id === row.category_id);
+          return "<tr><td>" + row.id + "</td><td>" + esc(row.title) + "</td><td>" + esc(cat ? cat.category_name : row.category_id) + "</td>" +
+            '<td class="actions"><button type="button" class="btn btn-sm" data-e="' + row.id + '">Edit</button> ' +
+            '<button type="button" class="btn btn-sm" data-ep="' + row.id + '">Episodes</button> ' +
+            '<button type="button" class="btn btn-sm btn-danger" data-d="' + row.id + '">Delete</button></td></tr>';
+        }).join("") || '<tr><td colspan="4" class="empty-state">No series</td></tr>';
+        $(".pagination").outerHTML = paginationHtml(r.total);
+        bindPagination({ total: r.total, load });
+        $$("#tbody-s [data-e]").forEach((b) => b.onclick = () => editSeries(+b.dataset.e));
+        $$("#tbody-s [data-ep]").forEach((b) => b.onclick = () => openEpisodesModal(+b.dataset.ep));
+        $$("#tbody-s [data-d]").forEach((b) => b.onclick = () => openConfirm("Delete series #" + b.dataset.d + "?", async () => {
+          try { await api("/vod/series/" + b.dataset.d, { method: "DELETE" }); closeConfirm(); toast("Deleted"); load(); } catch (e) { toast(e.message, "error"); }
+        }));
+      } catch (e) { $("#tbody-s").innerHTML = '<tr><td colspan="4">' + esc(e.message) + "</td></tr>"; }
+    }
+    $("#ser-go").onclick = () => { state.page = 1; load(); };
+    $("#ser-new").onclick = () => editSeries(null);
+    await loadCategories();
+    $("#ser-cat").innerHTML = '<option value="">All categories</option>' + categoryOptions().replace(/^<option value="">—<\/option>/, "");
+    await load();
+  }
+
+  function editSeries(id) {
+    const isNew = id == null;
+    openModalForm(isNew ? "New series" : "Edit series", "", null);
+    const body = $("#modal-form-body");
+    body.innerHTML =
+      '<div class="form-grid">' +
+      '<div class="full field"><label>Title *</label><input name="title" required /></div>' +
+      '<div class="field"><label>Category</label><select name="category_id">' + categoryOptions() + "</select></div>" +
+      '<div class="field"><label>Cover URL</label><input name="cover" /></div>' +
+      '<div class="full field"><label>Plot</label><textarea name="plot" rows="2"></textarea></div>' +
+      '<div class="field"><label>Genre</label><input name="genre" /></div>' +
+      '<div class="field"><label>TMDB ID</label><input name="tmdb_id" type="number" /></div></div>';
+    (async () => {
+      if (!isNew) {
+        try {
+          const row = await api("/vod/series/" + id);
+          for (const el of $$("[name]", body)) {
+            if (el.name === "category_id") el.value = row.category_id != null ? row.category_id : "";
+            else if (el.name === "tmdb_id") el.value = row.tmdb_id != null ? row.tmdb_id : "";
+            else if (row[el.name] != null) el.value = row[el.name];
+          }
+        } catch (e) { toast(e.message, "error"); closeModalForm(); }
+      }
+    })();
+    $("#modal-form-save").onclick = async () => {
+      const o = {};
+      for (const el of $$("[name]", body)) {
+        if (el.name === "category_id") { o.category_id = el.value === "" ? null : +el.value; continue; }
+        if (el.name === "tmdb_id") { o.tmdb_id = el.value === "" ? null : +el.value; continue; }
+        const v = el.value.trim();
+        o[el.name] = v === "" ? null : v;
+      }
+      if (!o.title) { toast("Title required", "error"); return; }
+      try {
+        if (isNew) await api("/vod/series", { method: "POST", body: JSON.stringify(o) });
+        else await api("/vod/series/" + id, { method: "PUT", body: JSON.stringify(o) });
+        toast("Saved"); closeModalForm(); render();
+      } catch (e) { toast(e.message, "error"); }
+    };
+  }
+
+  function openEpisodesModal(seriesId) {
+    state.seriesForEpisodes = seriesId;
+    openModalForm("Episodes — series #" + seriesId, '<div id="ep-list"></div><hr style="border-color:var(--border);margin:1rem 0" /><h3 style="margin:0 0 0.5rem;font-size:0.95rem">Add episode</h3>' +
+      '<div class="form-grid">' +
+      '<div class="field"><label>Season</label><input id="ep-sn" type="number" value="1" /></div>' +
+      '<div class="field"><label>Episode</label><input id="ep-en" type="number" value="1" /></div>' +
+      '<div class="full field"><label>Name</label><input id="ep-name" /></div>' +
+      '<div class="full field"><label>Source</label><input id="ep-src" /></div>' +
+      '<div class="field"><label>Container</label><input id="ep-cont" value="mkv" /></div></div>' +
+      '<button type="button" class="btn btn-primary" id="ep-add" style="margin-top:0.75rem">Add episode</button>', null);
+
+    async function refreshList() {
+      try {
+        const eps = await api("/vod/series/" + seriesId + "/episodes");
+        $("#ep-list").innerHTML = '<div class="table-wrap"><table class="data-table"><thead><tr><th>ID</th><th>S/E</th><th>Name</th><th>Actions</th></tr></thead><tbody>' +
+          eps.map((e) => "<tr><td>" + e.id + "</td><td>" + e.season_number + "×" + e.episode_number + "</td><td>" + esc(e.stream_display_name) + "</td>" +
+            '<td class="actions"><button type="button" class="btn btn-sm" data-ed="' + e.id + '">Edit</button> ' +
+            '<button type="button" class="btn btn-sm btn-danger" data-de="' + e.id + '">Del</button></td></tr>').join("") + "</tbody></table></div>";
+        $$("#ep-list [data-ed]").forEach((b) => b.onclick = () => editEpisode(seriesId, +b.dataset.ed));
+        $$("#ep-list [data-de]").forEach((b) => b.onclick = () => openConfirm("Delete episode?", async () => {
+          try { await api("/vod/series/" + seriesId + "/episodes/" + b.dataset.de, { method: "DELETE" }); closeConfirm(); toast("Deleted"); refreshList(); } catch (e) { toast(e.message, "error"); }
+        }));
+      } catch (e) { $("#ep-list").innerHTML = "<p>" + esc(e.message) + "</p>"; }
+    }
+
+    $("#ep-add").onclick = async () => {
+      try {
+        await api("/vod/series/" + seriesId + "/episodes", {
+          method: "POST",
+          body: JSON.stringify({
+            season_number: +$("#ep-sn").value || 1,
+            episode_number: +$("#ep-en").value || 1,
+            stream_display_name: $("#ep-name").value || "",
+            stream_source: $("#ep-src").value || "",
+            container_extension: $("#ep-cont").value || "mkv"
+          })
+        });
+        toast("Episode added");
+        $("#ep-name").value = ""; $("#ep-src").value = "";
+        refreshList();
+      } catch (e) { toast(e.message, "error"); }
+    };
+    $("#modal-form-save").style.display = "none";
+    refreshList();
+  }
+
+  function editEpisode(seriesId, epId) {
+    openModalForm("Edit episode #" + epId, "", null);
+    $("#modal-form-save").style.display = "";
+    const body = $("#modal-form-body");
+    body.innerHTML =
+      '<div class="form-grid">' +
+      '<div class="field"><label>Season</label><input name="season_number" type="number" /></div>' +
+      '<div class="field"><label>Episode</label><input name="episode_number" type="number" /></div>' +
+      '<div class="full field"><label>Name</label><input name="stream_display_name" /></div>' +
+      '<div class="full field"><label>Source</label><input name="stream_source" /></div>' +
+      '<div class="field"><label>Container</label><input name="container_extension" /></div></div>';
+    (async () => {
+      try {
+        const row = await api("/vod/series/" + seriesId + "/episodes/" + epId);
+        for (const el of $$("[name]", body)) if (row[el.name] != null) el.value = row[el.name];
+      } catch (e) { toast(e.message, "error"); closeModalForm(); }
+    })();
+    $("#modal-form-save").onclick = async () => {
+      const o = {};
+      for (const el of $$("[name]", body)) {
+        if (el.type === "number") o[el.name] = el.value === "" ? null : +el.value;
+        else o[el.name] = el.value.trim() === "" ? null : el.value.trim();
+      }
+      try {
+        await api("/vod/series/" + seriesId + "/episodes/" + epId, { method: "PUT", body: JSON.stringify(o) });
+        toast("Saved"); closeModalForm();
+        if (state.seriesForEpisodes) openEpisodesModal(state.seriesForEpisodes);
+        else render();
+      } catch (e) { toast(e.message, "error"); }
+    };
+  }
+
+  /* ——— Categories ——— */
+  async function renderCategories() {
+    $("#main-content").innerHTML =
+      '<h1 class="page-title">Categories</h1><div class="toolbar">' +
+      '<select id="cat-type" style="width:auto"><option value="">All types</option><option value="live">live</option><option value="movie">movie</option><option value="series">series</option><option value="radio">radio</option></select>' +
+      '<button type="button" class="btn btn-primary" id="cat-go">Apply</button>' +
+      '<button type="button" class="btn" id="cat-new">+ New category</button></div>' +
+      '<div class="table-wrap"><table class="data-table"><thead><tr><th>ID</th><th>Name</th><th>Type</th><th>Parent</th><th>Order</th><th>Actions</th></tr></thead><tbody id="tbody"></tbody></table></div>' +
+      paginationHtml(0);
+
+    async function load() {
+      const params = new URLSearchParams({ page: state.page, per_page: state.perPage });
+      const t = $("#cat-type").value;
+      if (t) params.set("category_type", t);
+      try {
+        const r = await api("/categories?" + params);
+        $("#tbody").innerHTML = r.items.map((row) =>
+          "<tr><td>" + row.id + "</td><td>" + esc(row.category_name) + "</td><td>" + esc(row.category_type) + "</td><td>" + esc(row.parent_id) + "</td><td>" + row.order + "</td>" +
+          '<td class="actions"><button type="button" class="btn btn-sm" data-e="' + row.id + '">Edit</button> ' +
+          '<button type="button" class="btn btn-sm btn-danger" data-d="' + row.id + '">Delete</button></td></tr>'
+        ).join("") || '<tr><td colspan="6" class="empty-state">No categories</td></tr>';
+        $(".pagination").outerHTML = paginationHtml(r.total);
+        bindPagination({ total: r.total, load });
+        $$("[data-e]").forEach((b) => b.onclick = () => editCategory(+b.dataset.e));
+        $$("[data-d]").forEach((b) => b.onclick = () => openConfirm("Delete category #" + b.dataset.d + "?", async () => {
+          try { await api("/categories/" + b.dataset.d, { method: "DELETE" }); closeConfirm(); toast("Deleted"); load(); } catch (e) { toast(e.message, "error"); }
+        }));
+      } catch (e) { $("#tbody").innerHTML = '<tr><td colspan="6">' + esc(e.message) + "</td></tr>"; }
+    }
+    $("#cat-go").onclick = () => { state.page = 1; load(); };
+    $("#cat-new").onclick = () => editCategory(null);
+    await load();
+  }
+
+  function editCategory(id) {
+    const isNew = id == null;
+    openModalForm(isNew ? "New category" : "Edit category", "", null);
+    const body = $("#modal-form-body");
+    body.innerHTML =
+      '<div class="form-grid">' +
+      '<div class="full field"><label>Name *</label><input name="category_name" required /></div>' +
+      '<div class="field"><label>Type</label><select name="category_type"><option value="live">live</option><option value="movie">movie</option><option value="series">series</option><option value="radio">radio</option></select></div>' +
+      '<div class="field"><label>Parent ID</label><input name="parent_id" type="number" placeholder="optional" /></div>' +
+      '<div class="field"><label>Order</label><input name="order" type="number" value="0" /></div></div>';
+    (async () => {
+      if (!isNew) {
+        try {
+          const row = await api("/categories/" + id);
+          for (const el of $$("[name]", body)) {
+            if (el.name === "parent_id") el.value = row.parent_id != null ? row.parent_id : "";
+            else if (row[el.name] != null) el.value = row[el.name];
+          }
+        } catch (e) { toast(e.message, "error"); closeModalForm(); }
+      }
+    })();
+    $("#modal-form-save").onclick = async () => {
+      const o = {
+        category_name: body.querySelector("[name=category_name]").value.trim(),
+        category_type: body.querySelector("[name=category_type]").value,
+        order: +body.querySelector("[name=order]").value || 0,
+        parent_id: (() => { const v = body.querySelector("[name=parent_id]").value.trim(); return v === "" ? null : +v; })()
+      };
+      if (!o.category_name) return toast("Name required", "error");
+      try {
+        if (isNew) await api("/categories", { method: "POST", body: JSON.stringify(o) });
+        else await api("/categories/" + id, { method: "PUT", body: JSON.stringify(o) });
+        toast("Saved"); closeModalForm(); render();
+      } catch (e) { toast(e.message, "error"); }
+    };
+  }
+
+  /* ——— Bouquets ——— */
+  async function renderBouquets() {
+    $("#main-content").innerHTML =
+      '<h1 class="page-title">Bouquets</h1><div class="toolbar">' +
+      '<input type="search" id="bq-filter" placeholder="Filter name…" style="max-width:220px" />' +
+      '<button type="button" class="btn" id="bq-new">+ New bouquet</button></div>' +
+      '<div class="table-wrap"><table class="data-table"><thead><tr><th>ID</th><th>Name</th><th>Ch / Mov / Ser</th><th>Order</th><th>Actions</th></tr></thead><tbody id="tbody"></tbody></table></div>';
+
+    let all = [];
+    async function load() {
+      try {
+        all = await api("/bouquets");
+        const f = ($("#bq-filter").value || "").toLowerCase();
+        const rows = f ? all.filter((b) => (b.bouquet_name || "").toLowerCase().includes(f)) : all;
+        $("#tbody").innerHTML = rows.map((row) =>
+          "<tr><td>" + row.id + "</td><td>" + esc(row.bouquet_name) + "</td><td class=\"mono\">" +
+          (row.bouquet_channels || []).length + " / " + (row.bouquet_movies || []).length + " / " + (row.bouquet_series || []).length + "</td><td>" + row.bouquet_order + "</td>" +
+          '<td class="actions"><button type="button" class="btn btn-sm" data-e="' + row.id + '">Edit</button> ' +
+          '<button type="button" class="btn btn-sm btn-danger" data-d="' + row.id + '">Delete</button></td></tr>'
+        ).join("") || '<tr><td colspan="5" class="empty-state">No bouquets</td></tr>';
+        $$("[data-e]").forEach((b) => b.onclick = () => editBouquet(+b.dataset.e));
+        $$("[data-d]").forEach((b) => b.onclick = () => openConfirm("Delete bouquet?", async () => {
+          try { await api("/bouquets/" + b.dataset.d, { method: "DELETE" }); closeConfirm(); toast("Deleted"); load(); } catch (e) { toast(e.message, "error"); }
+        }));
+      } catch (e) { $("#tbody").innerHTML = '<tr><td colspan="5">' + esc(e.message) + "</td></tr>"; }
+    }
+    $("#bq-filter").oninput = () => load();
+    $("#bq-new").onclick = () => editBouquet(null);
+    await load();
+  }
+
+  function editBouquet(id) {
+    const isNew = id == null;
+    openModalForm(isNew ? "New bouquet" : "Edit bouquet", "", null);
+    const body = $("#modal-form-body");
+    body.innerHTML =
+      '<div class="form-grid">' +
+      '<div class="full field"><label>Name *</label><input name="bouquet_name" required /></div>' +
+      '<div class="full field"><label>Channel IDs (JSON array e.g. [1,2,3])</label><textarea name="bouquet_channels" rows="2">[]</textarea></div>' +
+      '<div class="full field"><label>Movie IDs (JSON)</label><textarea name="bouquet_movies" rows="2">[]</textarea></div>' +
+      '<div class="full field"><label>Series IDs (JSON)</label><textarea name="bouquet_series" rows="2">[]</textarea></div>' +
+      '<div class="full field"><label>Radio IDs (JSON)</label><textarea name="bouquet_radios" rows="2">[]</textarea></div>' +
+      '<div class="field"><label>Order</label><input name="bouquet_order" type="number" value="0" /></div></div>';
+    (async () => {
+      if (!isNew) {
+        try {
+          const row = await api("/bouquets/" + id);
+          body.querySelector("[name=bouquet_name]").value = row.bouquet_name;
+          body.querySelector("[name=bouquet_channels]").value = JSON.stringify(row.bouquet_channels || []);
+          body.querySelector("[name=bouquet_movies]").value = JSON.stringify(row.bouquet_movies || []);
+          body.querySelector("[name=bouquet_series]").value = JSON.stringify(row.bouquet_series || []);
+          body.querySelector("[name=bouquet_radios]").value = JSON.stringify(row.bouquet_radios || []);
+          body.querySelector("[name=bouquet_order]").value = row.bouquet_order;
+        } catch (e) { toast(e.message, "error"); closeModalForm(); }
+      }
+    })();
+    $("#modal-form-save").onclick = async () => {
+      const parseArr = (txt) => {
+        try {
+          const j = JSON.parse(txt.trim() || "[]");
+          return Array.isArray(j) ? j.map((x) => +x) : [];
+        } catch (_) { throw new Error("Invalid JSON array"); }
+      };
+      let ch, mv, se, ra;
+      try {
+        ch = parseArr(body.querySelector("[name=bouquet_channels]").value);
+        mv = parseArr(body.querySelector("[name=bouquet_movies]").value);
+        se = parseArr(body.querySelector("[name=bouquet_series]").value);
+        ra = parseArr(body.querySelector("[name=bouquet_radios]").value);
+      } catch (e) { toast(e.message, "error"); return; }
+      const o = {
+        bouquet_name: body.querySelector("[name=bouquet_name]").value.trim(),
+        bouquet_channels: ch,
+        bouquet_movies: mv,
+        bouquet_series: se,
+        bouquet_radios: ra,
+        bouquet_order: +body.querySelector("[name=bouquet_order]").value || 0
+      };
+      if (!o.bouquet_name) return toast("Name required", "error");
+      try {
+        if (isNew) await api("/bouquets", { method: "POST", body: JSON.stringify(o) });
+        else await api("/bouquets/" + id, { method: "PUT", body: JSON.stringify(o) });
+        toast("Saved"); closeModalForm(); render();
+      } catch (e) { toast(e.message, "error"); }
+    };
+  }
+
+  /* ——— Servers ——— */
+  async function renderServers() {
+    $("#main-content").innerHTML =
+      '<h1 class="page-title">Servers</h1><div class="toolbar">' +
+      '<button type="button" class="btn" id="srv-new">+ New server</button></div>' +
+      '<div class="table-wrap"><table class="data-table"><thead><tr><th>ID</th><th>Name</th><th>IP</th><th>Main</th><th>Status</th><th>Actions</th></tr></thead><tbody id="tbody"></tbody></table></div>';
+
+    async function load() {
+      try {
+        const rows = await api("/servers");
+        state.serversCache = rows;
+        $("#tbody").innerHTML = rows.map((row) =>
+          "<tr><td>" + row.id + "</td><td>" + esc(row.server_name) + "</td><td class=\"mono\">" + esc(row.server_ip) + "</td><td>" + (row.is_main ? "✓" : "—") + "</td><td>" + row.status + "</td>" +
+          '<td class="actions"><button type="button" class="btn btn-sm" data-e="' + row.id + '">Edit</button> ' +
+          '<button type="button" class="btn btn-sm" data-ss="' + row.id + '">Streams</button> ' +
+          '<button type="button" class="btn btn-sm btn-danger" data-d="' + row.id + '">Delete</button></td></tr>'
+        ).join("") || '<tr><td colspan="6" class="empty-state">No servers</td></tr>';
+        $$("[data-e]").forEach((b) => b.onclick = () => editServer(+b.dataset.e));
+        $$("[data-ss]").forEach((b) => b.onclick = () => serverStreamsModal(+b.dataset.ss));
+        $$("[data-d]").forEach((b) => b.onclick = () => openConfirm("Delete server #" + b.dataset.d + "?", async () => {
+          try { await api("/servers/" + b.dataset.d, { method: "DELETE" }); closeConfirm(); toast("Deleted"); load(); } catch (e) { toast(e.message, "error"); }
+        }));
+      } catch (e) { $("#tbody").innerHTML = '<tr><td colspan="6">' + esc(e.message) + "</td></tr>"; }
+    }
+    $("#srv-new").onclick = () => editServer(null);
+    await load();
+  }
+
+  function editServer(id) {
+    const isNew = id == null;
+    openModalForm(isNew ? "New server" : "Edit server", "", null);
+    const body = $("#modal-form-body");
+    body.innerHTML =
+      '<div class="form-grid">' +
+      '<div class="field"><label>Name</label><input name="server_name" /></div>' +
+      '<div class="field"><label>IP</label><input name="server_ip" /></div>' +
+      '<div class="field"><label>Domain</label><input name="domain_name" /></div>' +
+      '<div class="field"><label>Protocol</label><select name="server_protocol"><option>http</option><option>https</option></select></div>' +
+      '<div class="field"><label>HTTP port</label><input name="http_port" type="number" value="80" /></div>' +
+      '<div class="field"><label>HTTPS port</label><input name="https_port" type="number" value="443" /></div>' +
+      '<div class="field"><label>RTMP port</label><input name="rtmp_port" type="number" value="1935" /></div>' +
+      '<div class="field"><label>SSH port</label><input name="ssh_port" type="number" value="22" /></div>' +
+      '<div class="field"><label><input type="checkbox" name="is_main" /> Main server</label></div>' +
+      '<div class="field"><label><input type="checkbox" name="enable_geoip" checked /> GeoIP</label></div>' +
+      '<div class="field"><label>Status (int)</label><input name="status" type="number" value="0" /></div>' +
+      '<div class="field"><label>Parent ID</label><input name="parent_id" type="number" placeholder="optional" /></div></div>';
+    (async () => {
+      if (!isNew) {
+        try {
+          const row = await api("/servers/" + id);
+          for (const el of $$("[name]", body)) {
+            if (el.type === "checkbox") el.checked = !!row[el.name];
+            else if (row[el.name] != null && el.name !== "ssh_password") el.value = row[el.name];
+          }
+        } catch (e) { toast(e.message, "error"); closeModalForm(); }
+      }
+    })();
+    $("#modal-form-save").onclick = async () => {
+      const o = {};
+      for (const el of $$("[name]", body)) {
+        if (el.type === "checkbox") { o[el.name] = el.checked; continue; }
+        if (el.name === "parent_id") { const v = el.value.trim(); o.parent_id = v === "" ? null : +v; continue; }
+        if (el.type === "number") o[el.name] = +el.value;
+        else o[el.name] = el.value.trim();
+      }
+      try {
+        if (isNew) await api("/servers", { method: "POST", body: JSON.stringify(o) });
+        else await api("/servers/" + id, { method: "PUT", body: JSON.stringify(o) });
+        toast("Saved"); closeModalForm(); render();
+      } catch (e) { toast(e.message, "error"); }
+    };
+  }
+
+  function serverStreamsModal(serverId) {
+    openModalForm("Server streams — #" + serverId, '<div id="ss-body"></div><hr style="border-color:var(--border);margin:1rem 0"/><div class="field"><label>Assign stream ID</label><input id="ss-new-id" type="number" /></div><button type="button" class="btn btn-primary" id="ss-assign">Assign</button>', null);
+    $("#modal-form-save").style.display = "none";
+    async function load() {
+      try {
+        const list = await api("/servers/" + serverId + "/streams");
+        $("#ss-body").innerHTML = '<table class="data-table"><thead><tr><th>Stream</th><th>PID</th><th>On demand</th><th>Actions</th></tr></thead><tbody>' +
+          list.map((x) => "<tr><td>" + x.stream_id + "</td><td>" + esc(x.pid) + "</td><td>" + (x.on_demand ? "yes" : "no") + "</td>" +
+            '<td><button type="button" class="btn btn-sm btn-danger" data-rm="' + x.stream_id + '">Unassign</button></td></tr>').join("") + "</tbody></table>";
+        $$("#ss-body [data-rm]").forEach((b) => b.onclick = async () => {
+          try {
+            await api("/servers/" + serverId + "/streams/" + b.dataset.rm, { method: "DELETE" });
+            toast("Unassigned"); load();
+          } catch (e) { toast(e.message, "error"); }
+        });
+      } catch (e) { $("#ss-body").innerHTML = "<p>" + esc(e.message) + "</p>"; }
+    }
+    $("#ss-assign").onclick = async () => {
+      const sid = +$("#ss-new-id").value;
+      if (!sid) return toast("Enter stream ID", "error");
+      try {
+        await api("/servers/" + serverId + "/streams", { method: "POST", body: JSON.stringify({ stream_id: sid }) });
+        toast("Assigned"); $("#ss-new-id").value = ""; load();
+      } catch (e) { toast(e.message, "error"); }
+    };
+    load();
+  }
+
+  /* ——— EPG ——— */
+  async function renderEpg() {
+    $("#main-content").innerHTML =
+      '<h1 class="page-title">EPG Programs</h1><div class="toolbar">' +
+      '<input id="epg-eid" placeholder="epg_id filter" style="max-width:140px" />' +
+      '<input id="epg-ch" type="number" placeholder="channel_id" style="max-width:120px" />' +
+      '<button type="button" class="btn btn-primary" id="epg-go">Apply</button>' +
+      '<button type="button" class="btn" id="epg-new">+ New program</button>' +
+      '<button type="button" class="btn" id="epg-xml">Import XMLTV</button>' +
+      '<button type="button" class="btn" id="epg-old">Clear old</button>' +
+      '<button type="button" class="btn btn-danger" id="epg-all">Clear all</button></div>' +
+      '<div class="table-wrap"><table class="data-table"><thead><tr><th>ID</th><th>Title</th><th>Start</th><th>End</th><th>Ch</th><th>Actions</th></tr></thead><tbody id="tbody"></tbody></table></div>' +
+      paginationHtml(0);
+
+    async function load() {
+      const params = new URLSearchParams({ page: state.page, per_page: state.perPage });
+      const ch = $("#epg-ch").value.trim();
+      const eid = $("#epg-eid").value.trim();
+      if (ch) params.set("channel_id", ch);
+      if (eid) params.set("epg_id", eid);
+      try {
+        const r = await api("/epg/programs?" + params);
+        $("#tbody").innerHTML = r.items.map((row) =>
+          "<tr><td>" + row.id + "</td><td>" + esc(row.title) + "</td><td class=\"mono\">" + esc(row.start) + "</td><td class=\"mono\">" + esc(row.end) + "</td><td>" + esc(row.channel_id) + "</td>" +
+          '<td class="actions"><button type="button" class="btn btn-sm" data-e="' + row.id + '">Edit</button> ' +
+          '<button type="button" class="btn btn-sm btn-danger" data-d="' + row.id + '">Delete</button></td></tr>'
+        ).join("") || '<tr><td colspan="6" class="empty-state">No programs</td></tr>';
+        $(".pagination").outerHTML = paginationHtml(r.total);
+        bindPagination({ total: r.total, load });
+        $$("[data-e]").forEach((b) => b.onclick = () => editEpg(+b.dataset.e));
+        $$("[data-d]").forEach((b) => b.onclick = () => openConfirm("Delete EPG program?", async () => {
+          try { await api("/epg/programs/" + b.dataset.d, { method: "DELETE" }); closeConfirm(); toast("Deleted"); load(); } catch (e) { toast(e.message, "error"); }
+        }));
+      } catch (e) { $("#tbody").innerHTML = '<tr><td colspan="6">' + esc(e.message) + "</td></tr>"; }
+    }
+    $("#epg-go").onclick = () => { state.page = 1; load(); };
+    $("#epg-new").onclick = () => editEpg(null);
+    $("#epg-xml").onclick = () => {
+      openModalForm("Import XMLTV", '<div class="field"><label>XML content</label><textarea id="xmltv" rows="12" placeholder="<tv>…"></textarea></div>', null);
+      $("#modal-form-save").textContent = "Import";
+      $("#modal-form-save").onclick = async () => {
+        try {
+          const r = await api("/epg/import/xmltv", { method: "POST", body: JSON.stringify({ xml_content: $("#xmltv").value }) });
+          toast("Imported: " + r.imported);
+          closeModalForm();
+          render();
+        } catch (e) { toast(e.message, "error"); }
+      };
+    };
+    $("#epg-old").onclick = () => openConfirm("Clear programs older than 7 days?", async () => {
+      try { const r = await api("/epg/maintenance/clear-old?days=7", { method: "POST", body: "{}" }); closeConfirm(); toast("Removed: " + r.deleted); load(); } catch (e) { toast(e.message, "error"); }
+    });
+    $("#epg-all").onclick = () => openConfirm("Delete ALL EPG data?", async () => {
+      try { const r = await api("/epg/maintenance/clear-all", { method: "POST", body: "{}" }); closeConfirm(); toast("Removed: " + r.deleted); load(); } catch (e) { toast(e.message, "error"); }
+    });
+    await load();
+  }
+
+  function editEpg(id) {
+    const isNew = id == null;
+    openModalForm(isNew ? "New EPG program" : "Edit EPG program", "", null);
+    $("#modal-form-save").textContent = "Save";
+    const body = $("#modal-form-body");
+    body.innerHTML =
+      '<div class="form-grid">' +
+      '<div class="field"><label>EPG ID</label><input name="epg_id" /></div>' +
+      '<div class="field"><label>Channel ID</label><input name="channel_id" type="number" /></div>' +
+      '<div class="full field"><label>Title *</label><input name="title" required /></div>' +
+      '<div class="field"><label>Lang</label><input name="lang" /></div>' +
+      '<div class="field"><label>Start (ISO) *</label><input name="start" required placeholder="2026-03-25T12:00:00" /></div>' +
+      '<div class="field"><label>End (ISO) *</label><input name="end" required /></div>' +
+      '<div class="full field"><label>Description</label><textarea name="description" rows="2"></textarea></div></div>';
+    (async () => {
+      if (!isNew) {
+        try {
+          const row = await api("/epg/programs/" + id);
+          for (const el of $$("[name]", body)) {
+            if (el.name === "channel_id") el.value = row.channel_id != null ? row.channel_id : "";
+            else if (row[el.name] != null) el.value = row[el.name];
+          }
+        } catch (e) { toast(e.message, "error"); closeModalForm(); }
+      } else {
+        const now = new Date();
+        const later = new Date(now.getTime() + 3600000);
+        body.querySelector("[name=start]").value = now.toISOString().slice(0, 19);
+        body.querySelector("[name=end]").value = later.toISOString().slice(0, 19);
+      }
+    })();
+    $("#modal-form-save").onclick = async () => {
+      const o = {
+        epg_id: body.querySelector("[name=epg_id]").value.trim() || null,
+        title: body.querySelector("[name=title]").value.trim(),
+        lang: body.querySelector("[name=lang]").value.trim() || null,
+        start: body.querySelector("[name=start]").value.trim(),
+        end: body.querySelector("[name=end]").value.trim(),
+        description: body.querySelector("[name=description]").value.trim() || null,
+        channel_id: (() => { const v = body.querySelector("[name=channel_id]").value.trim(); return v === "" ? null : +v; })()
+      };
+      if (!o.title) return toast("Title required", "error");
+      try {
+        if (isNew) await api("/epg/programs", { method: "POST", body: JSON.stringify(o) });
+        else await api("/epg/programs/" + id, { method: "PUT", body: JSON.stringify(o) });
+        toast("Saved"); closeModalForm(); render();
+      } catch (e) { toast(e.message, "error"); }
+    };
+  }
+
+  /* ——— Resellers ——— */
+  async function renderResellers() {
+    $("#main-content").innerHTML =
+      '<h1 class="page-title">Resellers</h1><div class="toolbar">' +
+      '<button type="button" class="btn" id="rs-new">+ New reseller</button></div>' +
+      '<div class="table-wrap"><table class="data-table"><thead><tr><th>ID</th><th>User</th><th>Credits</th><th>Status</th><th>Actions</th></tr></thead><tbody id="tbody"></tbody></table></div>' +
+      paginationHtml(0);
+
+    async function load() {
+      const params = new URLSearchParams({ page: state.page, per_page: state.perPage });
+      try {
+        const r = await api("/resellers?" + params);
+        $("#tbody").innerHTML = r.items.map((row) =>
+          "<tr><td>" + row.id + "</td><td>" + esc(row.username) + "</td><td>" + row.credits + "</td><td>" + row.status + "</td>" +
+          '<td class="actions"><button type="button" class="btn btn-sm" data-e="' + row.id + '">Edit</button> ' +
+          '<button type="button" class="btn btn-sm" data-a="' + row.id + '">+10 cr</button> ' +
+          '<button type="button" class="btn btn-sm btn-danger" data-d="' + row.id + '">Delete</button></td></tr>'
+        ).join("") || '<tr><td colspan="5" class="empty-state">No resellers</td></tr>';
+        $(".pagination").outerHTML = paginationHtml(r.total);
+        bindPagination({ total: r.total, load });
+        $$("[data-e]").forEach((b) => b.onclick = () => editReseller(+b.dataset.e));
+        $$("[data-a]").forEach((b) => b.onclick = async () => {
+          try { await api("/resellers/" + b.dataset.a + "/credits/add", { method: "POST", body: JSON.stringify({ amount: 10 }) }); toast("+10 credits"); load(); } catch (e) { toast(e.message, "error"); }
+        });
+        $$("[data-d]").forEach((b) => b.onclick = () => openConfirm("Delete reseller?", async () => {
+          try { await api("/resellers/" + b.dataset.d, { method: "DELETE" }); closeConfirm(); toast("Deleted"); load(); } catch (e) { toast(e.message, "error"); }
+        }));
+      } catch (e) { $("#tbody").innerHTML = '<tr><td colspan="5">' + esc(e.message) + "</td></tr>"; }
+    }
+    $("#rs-new").onclick = () => editReseller(null);
+    await load();
+  }
+
+  function editReseller(id) {
+    const isNew = id == null;
+    openModalForm(isNew ? "New reseller" : "Edit reseller", "", null);
+    const body = $("#modal-form-body");
+    body.innerHTML =
+      '<div class="form-grid">' +
+      '<div class="field"><label>Username *</label><input name="username" required ' + (isNew ? "" : "readonly style=\"opacity:0.7\"") + " /></div>" +
+      '<div class="field"><label>Password ' + (isNew ? "*" : "(optional)") + "</label><input name=\"password\" type=\"password\" " + (isNew ? "required" : "") + " /></div>" +
+      '<div class="field"><label>Credits</label><input name="credits" type="number" value="0" /></div>' +
+      '<div class="field"><label>Status</label><input name="status" type="number" value="1" /></div>' +
+      '<div class="full field"><label>Notes</label><input name="notes" /></div>' +
+      '<div class="field"><label>Owner ID</label><input name="owner_id" type="number" placeholder="optional" /></div>' +
+      '<div class="field"><label>Max credits</label><input name="max_credits" type="number" placeholder="optional" /></div>' +
+      '<div class="full field"><label>Allowed IPs</label><input name="allowed_ips" /></div>' +
+      '<div class="full field"><label>Allowed packages</label><input name="allowed_packages" /></div></div>';
+    (async () => {
+      if (!isNew) {
+        try {
+          const row = await api("/resellers/" + id);
+          for (const el of $$("[name]", body)) {
+            if (el.name === "password") continue;
+            if (el.name === "owner_id" || el.name === "max_credits") el.value = row[el.name] != null ? row[el.name] : "";
+            else if (row[el.name] != null) el.value = row[el.name];
+          }
+        } catch (e) { toast(e.message, "error"); closeModalForm(); }
+      }
+    })();
+    $("#modal-form-save").onclick = async () => {
+      const o = {};
+      for (const el of $$("[name]", body)) {
+        if (el.name === "password" && !isNew && el.value.trim() === "") continue;
+        if (el.type === "number") {
+          const v = el.value.trim();
+          o[el.name] = v === "" ? null : +el.value;
+          continue;
+        }
+        const v = el.value.trim();
+        o[el.name] = v === "" ? null : v;
+      }
+      try {
+        if (isNew) await api("/resellers", { method: "POST", body: JSON.stringify(o) });
+        else await api("/resellers/" + id, { method: "PUT", body: JSON.stringify(o) });
+        toast("Saved"); closeModalForm(); render();
+      } catch (e) { toast(e.message, "error"); }
+    };
+  }
+
+  /* ——— Packages ——— */
+  async function renderPackages() {
+    $("#main-content").innerHTML =
+      '<h1 class="page-title">Packages</h1><div class="toolbar"><button type="button" class="btn" id="pk-new">+ New package</button></div>' +
+      '<div class="table-wrap"><table class="data-table"><thead><tr><th>ID</th><th>Name</th><th>Max conn</th><th>Trial</th><th>Official</th><th>Actions</th></tr></thead><tbody id="tbody"></tbody></table></div>';
+
+    async function load() {
+      try {
+        const rows = await api("/lines/packages");
+        $("#tbody").innerHTML = rows.map((row) =>
+          "<tr><td>" + row.id + "</td><td>" + esc(row.package_name) + "</td><td>" + row.max_connections + "</td><td>" + (row.is_trial ? "✓" : "—") + "</td><td>" + (row.is_official ? "✓" : "—") + "</td>" +
+          '<td class="actions"><button type="button" class="btn btn-sm" data-e="' + row.id + '">Edit</button> ' +
+          '<button type="button" class="btn btn-sm btn-danger" data-d="' + row.id + '">Delete</button></td></tr>'
+        ).join("") || '<tr><td colspan="6" class="empty-state">No packages</td></tr>';
+        $$("[data-e]").forEach((b) => b.onclick = () => editPackage(+b.dataset.e));
+        $$("[data-d]").forEach((b) => b.onclick = () => openConfirm("Delete package?", async () => {
+          try { await api("/lines/packages/" + b.dataset.d, { method: "DELETE" }); closeConfirm(); toast("Deleted"); load(); } catch (e) { toast(e.message, "error"); }
+        }));
+      } catch (e) { $("#tbody").innerHTML = '<tr><td colspan="6">' + esc(e.message) + "</td></tr>"; }
+    }
+    $("#pk-new").onclick = () => editPackage(null);
+    await load();
+  }
+
+  function editPackage(id) {
+    const isNew = id == null;
+    openModalForm(isNew ? "New package" : "Edit package", "", null);
+    const body = $("#modal-form-body");
+    body.innerHTML =
+      '<div class="form-grid" style="max-height:60vh;overflow:auto">' +
+      '<div class="full field"><label>Name</label><input name="package_name" /></div>' +
+      '<div class="field"><label><input type="checkbox" name="is_trial" /> Trial</label></div>' +
+      '<div class="field"><label><input type="checkbox" name="is_official" checked /> Official</label></div>' +
+      '<div class="field"><label>Trial credits</label><input name="trial_credits" type="number" value="0" /></div>' +
+      '<div class="field"><label>Official credits</label><input name="official_credits" type="number" value="0" /></div>' +
+      '<div class="field"><label>Trial duration</label><input name="trial_duration" type="number" value="0" /></div>' +
+      '<div class="field"><label>Official duration</label><input name="official_duration" type="number" value="0" /></div>' +
+      '<div class="field"><label>Max connections</label><input name="max_connections" type="number" value="1" /></div>' +
+      '<div class="field"><label>Force server ID</label><input name="force_server_id" type="number" placeholder="optional" /></div>' +
+      '<div class="field"><label>Max sub-resellers</label><input name="max_sub_resellers" type="number" value="0" /></div>' +
+      '<div class="field"><label><input type="checkbox" name="can_general_edit" /> Can general edit</label></div>' +
+      '<div class="field"><label><input type="checkbox" name="only_mag" /> Only MAG</label></div>' +
+      '<div class="field"><label><input type="checkbox" name="only_enigma" /> Only Enigma</label></div>' +
+      '<div class="field"><label><input type="checkbox" name="only_stalker" /> Only Stalker</label></div>' +
+      '<div class="full field"><label>Activity type</label><input name="activity_type" placeholder="optional" /></div>' +
+      '<div class="full field"><label>Allowed bouquets (JSON array)</label><textarea name="allowed_bouquets" rows="2">[]</textarea></div>' +
+      '<div class="full field"><label>Allowed output types (JSON array)</label><textarea name="allowed_output_types" rows="2">[]</textarea></div></div>';
+    (async () => {
+      if (!isNew) {
+        try {
+          const row = await api("/lines/packages/" + id);
+          for (const el of $$("[name]", body)) {
+            if (el.type === "checkbox") el.checked = !!row[el.name];
+            else if (el.tagName === "TEXTAREA") el.value = typeof row[el.name] === "string" ? row[el.name] : JSON.stringify(row[el.name] || []);
+            else if (row[el.name] != null) el.value = row[el.name];
+          }
+        } catch (e) { toast(e.message, "error"); closeModalForm(); }
+      }
+    })();
+    $("#modal-form-save").onclick = async () => {
+      const o = {};
+      for (const el of $$("[name]", body)) {
+        if (el.type === "checkbox") { o[el.name] = el.checked; continue; }
+        if (el.name === "force_server_id") { const v = el.value.trim(); o.force_server_id = v === "" ? null : +v; continue; }
+        if (el.tagName === "TEXTAREA") {
+          try { o[el.name] = JSON.parse(el.value.trim() || "[]"); } catch (_) { return toast("Invalid JSON in " + el.name, "error"); }
+          continue;
+        }
+        if (el.type === "number") o[el.name] = +el.value;
+        else o[el.name] = el.value.trim();
+      }
+      try {
+        if (isNew) await api("/lines/packages", { method: "POST", body: JSON.stringify(o) });
+        else await api("/lines/packages/" + id, { method: "PUT", body: JSON.stringify(o) });
+        toast("Saved"); closeModalForm(); render();
+      } catch (e) { toast(e.message, "error"); }
+    };
+  }
+
+  /* ——— Lines ——— */
+  async function renderLines() {
+    $("#main-content").innerHTML =
+      '<h1 class="page-title">Active lines</h1><div class="toolbar">' +
+      '<input id="ln-uid" type="number" placeholder="user_id" style="max-width:110px" />' +
+      '<input id="ln-sid" type="number" placeholder="stream_id" style="max-width:110px" />' +
+      '<input id="ln-srv" type="number" placeholder="server_id" style="max-width:110px" />' +
+      '<button type="button" class="btn btn-primary" id="ln-go">Filter</button>' +
+      '<button type="button" class="btn" id="ln-new">+ Add line</button>' +
+      '<button type="button" class="btn" id="ln-st">Online count</button></div>' +
+      '<div class="table-wrap"><table class="data-table"><thead><tr><th>ID</th><th>User</th><th>Stream</th><th>Server</th><th>IP</th><th>Actions</th></tr></thead><tbody id="tbody"></tbody></table></div>';
+
+    async function load() {
+      const p = new URLSearchParams();
+      const u = $("#ln-uid").value.trim();
+      const st = $("#ln-sid").value.trim();
+      const sv = $("#ln-srv").value.trim();
+      if (u) p.set("user_id", u);
+      if (st) p.set("stream_id", st);
+      if (sv) p.set("server_id", sv);
+      try {
+        const rows = await api("/lines" + (p.toString() ? "?" + p : ""));
+        $("#tbody").innerHTML = rows.map((row) =>
+          "<tr><td>" + row.id + "</td><td>" + row.user_id + "</td><td>" + row.stream_id + "</td><td>" + row.server_id + "</td><td class=\"mono\">" + esc(row.user_ip) + "</td>" +
+          '<td class="actions"><button type="button" class="btn btn-sm" data-e="' + row.id + '">Edit</button> ' +
+          '<button type="button" class="btn btn-sm btn-danger" data-d="' + row.id + '">Remove</button> ' +
+          '<button type="button" class="btn btn-sm" data-k="' + row.user_id + '">Kick user</button></td></tr>'
+        ).join("") || '<tr><td colspan="6" class="empty-state">No active lines</td></tr>';
+        $$("[data-e]").forEach((b) => b.onclick = () => editLine(+b.dataset.e));
+        $$("[data-d]").forEach((b) => b.onclick = () => openConfirm("Remove line #" + b.dataset.d + "?", async () => {
+          try { await api("/lines/" + b.dataset.d, { method: "DELETE" }); closeConfirm(); toast("Removed"); load(); } catch (e) { toast(e.message, "error"); }
+        }));
+        $$("[data-k]").forEach((b) => b.onclick = async () => {
+          try { const r = await api("/lines/kick/user/" + b.dataset.k, { method: "POST", body: "{}" }); toast("Kicked " + r.removed + " line(s)"); load(); } catch (e) { toast(e.message, "error"); }
+        });
+      } catch (e) { $("#tbody").innerHTML = '<tr><td colspan="6">' + esc(e.message) + "</td></tr>"; }
+    }
+    $("#ln-go").onclick = () => load();
+    $("#ln-new").onclick = () => editLine(null);
+    $("#ln-st").onclick = async () => {
+      try { const r = await api("/lines/stats/online-count"); toast("Online connections: " + r.online_connections); } catch (e) { toast(e.message, "error"); }
+    };
+    await loadServers();
+    await load();
+  }
+
+  function editLine(id) {
+    const isNew = id == null;
+    openModalForm(isNew ? "Create line" : "Edit line", "", null);
+    const body = $("#modal-form-body");
+    body.innerHTML =
+      '<div class="form-grid">' +
+      '<div class="field"><label>User ID *</label><input name="user_id" type="number" required /></div>' +
+      '<div class="field"><label>Server ID *</label><input name="server_id" type="number" required /></div>' +
+      '<div class="field"><label>Stream ID *</label><input name="stream_id" type="number" required /></div>' +
+      '<div class="field"><label>Container</label><input name="container" value="ts" /></div>' +
+      '<div class="field"><label>User IP</label><input name="user_ip" /></div>' +
+      '<div class="field"><label>User agent</label><input name="user_agent" /></div>' +
+      '<div class="field"><label>Country</label><input name="geoip_country_code" placeholder="e.g. US" /></div>' +
+      '<div class="field"><label>Bitrate</label><input name="bitrate" type="number" placeholder="optional" /></div></div>';
+    (async () => {
+      if (!isNew) {
+        try {
+          const row = await api("/lines/" + id);
+          for (const el of $$("[name]", body)) if (row[el.name] != null) el.value = row[el.name];
+        } catch (e) { toast(e.message, "error"); closeModalForm(); }
+      }
+    })();
+    $("#modal-form-save").onclick = async () => {
+      const o = {};
+      for (const el of $$("[name]", body)) {
+        if (el.type === "number") {
+          const v = el.value.trim();
+          o[el.name] = v === "" ? null : +el.value;
+        } else o[el.name] = el.value.trim() || null;
+      }
+      try {
+        if (isNew) await api("/lines", { method: "POST", body: JSON.stringify(o) });
+        else {
+          const up = Object.fromEntries(Object.entries(o).filter(([k]) => k !== "user_id"));
+          await api("/lines/" + id, { method: "PUT", body: JSON.stringify(up) });
+        }
+        toast("Saved"); closeModalForm(); render();
+      } catch (e) { toast(e.message, "error"); }
+    };
+  }
+
+  /* ——— Settings ——— */
+  async function renderSettings() {
+    $("#main-content").innerHTML =
+      '<h1 class="page-title">Settings</h1><div class="toolbar">' +
+      '<input type="search" id="set-q" placeholder="Filter key…" style="max-width:220px" />' +
+      '<button type="button" class="btn" id="set-new">+ New setting</button></div>' +
+      '<div class="table-wrap"><table class="data-table"><thead><tr><th>ID</th><th>Key</th><th>Value</th><th>Type</th><th>Actions</th></tr></thead><tbody id="tbody"></tbody></table></div>';
+
+    let all = [];
+    async function load() {
+      try {
+        all = await api("/settings");
+        const f = ($("#set-q").value || "").toLowerCase();
+        const rows = f ? all.filter((s) => (s.key || "").toLowerCase().includes(f)) : all;
+        $("#tbody").innerHTML = rows.map((row) =>
+          "<tr><td>" + row.id + "</td><td class=\"mono\">" + esc(row.key) + "</td><td>" + esc(typeof row.value === "object" ? JSON.stringify(row.value) : row.value) + "</td><td>" + esc(row.value_type) + "</td>" +
+          '<td class="actions"><button type="button" class="btn btn-sm" data-e="' + row.id + '">Edit</button> ' +
+          '<button type="button" class="btn btn-sm btn-danger" data-d="' + row.id + '">Delete</button></td></tr>'
+        ).join("") || '<tr><td colspan="5" class="empty-state">No settings</td></tr>';
+        $$("[data-e]").forEach((b) => b.onclick = () => editSetting(+b.dataset.e));
+        $$("[data-d]").forEach((b) => b.onclick = () => openConfirm("Delete this setting row?", async () => {
+          try { await api("/settings/" + b.dataset.d, { method: "DELETE" }); closeConfirm(); toast("Deleted"); load(); } catch (e) { toast(e.message, "error"); }
+        }));
+      } catch (e) { $("#tbody").innerHTML = '<tr><td colspan="5">' + esc(e.message) + "</td></tr>"; }
+    }
+    $("#set-q").oninput = () => load();
+    $("#set-new").onclick = () => editSetting(null);
+    await load();
+  }
+
+  function editSetting(id) {
+    const isNew = id == null;
+    openModalForm(isNew ? "New setting" : "Edit setting", "", null);
+    const body = $("#modal-form-body");
+    body.innerHTML =
+      '<div class="form-grid">' +
+      '<div class="full field"><label>Key *</label><input name="key" required ' + (isNew ? "" : "readonly style=\"opacity:0.7\"") + " /></div>" +
+      '<div class="field"><label>Value type</label><select name="value_type"><option>string</option><option>int</option><option>bool</option><option>json</option></select></div>' +
+      '<div class="full field"><label>Value</label><textarea name="value" rows="3"></textarea></div></div>';
+    (async () => {
+      if (!isNew) {
+        try {
+          const row = await api("/settings/" + id);
+          body.querySelector("[name=key]").value = row.key;
+          body.querySelector("[name=value_type]").value = row.value_type;
+          body.querySelector("[name=value]").value = typeof row.value === "object" ? JSON.stringify(row.value) : String(row.value ?? "");
+        } catch (e) { toast(e.message, "error"); closeModalForm(); }
+      }
+    })();
+    $("#modal-form-save").onclick = async () => {
+      const key = body.querySelector("[name=key]").value.trim();
+      const vt = body.querySelector("[name=value_type]").value;
+      let val = body.querySelector("[name=value]").value;
+      if (vt === "json") { try { val = JSON.parse(val || "null"); } catch (_) { return toast("Invalid JSON value", "error"); } }
+      if (vt === "int") val = +val;
+      if (vt === "bool") val = val === "true" || val === "1";
+      try {
+        if (isNew) await api("/settings", { method: "POST", body: JSON.stringify({ key, value: val, value_type: vt }) });
+        else await api("/settings/" + id, { method: "PUT", body: JSON.stringify({ value: val, value_type: vt }) });
+        toast("Saved"); closeModalForm(); render();
+      } catch (e) { toast(e.message, "error"); }
+    };
+  }
+
+  /* ——— Devices (MAG/Enigma2) ——— */
+  async function renderDevices() {
+    const c = $("#main-content");
+    c.innerHTML = '<h1 class="page-title">Devices (MAG / Enigma2)</h1>' +
+      '<div class="toolbar"><button class="btn" id="tab-mag">MAG Devices</button> <button class="btn" id="tab-e2">Enigma2 Devices</button></div>' +
+      '<div id="device-content"></div>';
+    async function loadMags() {
+      const r = await api("/mags?page=" + state.page + "&per_page=" + state.perPage);
+      $("#device-content").innerHTML = '<div class="table-wrap"><table class="data-table"><thead><tr><th>ID</th><th>Username</th><th>Max Conn</th><th>Expires</th><th>Enabled</th><th>Actions</th></tr></thead><tbody>' +
+        (r.items || []).map(u => "<tr><td>" + u.id + "</td><td>" + esc(u.username) + "</td><td>" + u.max_connections + "</td><td>" + esc(u.exp_date||"—") + "</td><td>" + (u.enabled?"On":"Off") + '</td><td><button class="btn btn-sm btn-danger" onclick="(async()=>{await api(\'/mags/'+u.id+'\',{method:\'DELETE\'});renderDevices()})()">Delete</button></td></tr>').join("") +
+        "</tbody></table></div>" + paginationHtml(r.total);
+      bindPagination({total:r.total, load:loadMags});
+    }
+    async function loadE2() {
+      const r = await api("/enigmas?page=" + state.page + "&per_page=" + state.perPage);
+      $("#device-content").innerHTML = '<div class="table-wrap"><table class="data-table"><thead><tr><th>ID</th><th>Username</th><th>Max Conn</th><th>Expires</th><th>Enabled</th><th>Actions</th></tr></thead><tbody>' +
+        (r.items || []).map(u => "<tr><td>" + u.id + "</td><td>" + esc(u.username) + "</td><td>" + u.max_connections + "</td><td>" + esc(u.exp_date||"—") + "</td><td>" + (u.enabled?"On":"Off") + '</td><td><button class="btn btn-sm btn-danger" onclick="(async()=>{await api(\'/enigmas/'+u.id+'\',{method:\'DELETE\'});renderDevices()})()">Delete</button></td></tr>').join("") +
+        "</tbody></table></div>" + paginationHtml(r.total);
+      bindPagination({total:r.total, load:loadE2});
+    }
+    $("#tab-mag").onclick = () => { state.page=1; loadMags(); };
+    $("#tab-e2").onclick = () => { state.page=1; loadE2(); };
+    await loadMags();
+  }
+
+  /* ——— Providers ——— */
+  async function renderProviders() {
+    const data = await api("/providers");
+    const c = $("#main-content");
+    c.innerHTML = '<h1 class="page-title">Stream Providers</h1><div class="table-wrap"><table class="data-table"><thead><tr><th>Domain</th><th>Streams</th></tr></thead><tbody>' +
+      data.map(p => "<tr><td>" + esc(p.domain) + "</td><td>" + p.stream_count + "</td></tr>").join("") +
+      "</tbody></table></div>";
+  }
+
+  /* ——— Tools ——— */
+  async function renderTools() {
+    const c = $("#main-content");
+    c.innerHTML = '<h1 class="page-title">Admin Tools</h1>' +
+      '<div class="stats-grid">' +
+      '<div class="stat-card" style="cursor:pointer" id="t-lc"><div class="stat-value">🔗</div><div class="stat-label">Live Connections</div></div>' +
+      '<div class="stat-card" style="cursor:pointer" id="t-pm"><div class="stat-value">⚡</div><div class="stat-label">Process Monitor</div></div>' +
+      '<div class="stat-card" style="cursor:pointer" id="t-prof"><div class="stat-value">🎚️</div><div class="stat-label">Transcode Profiles</div></div>' +
+      '<div class="stat-card" style="cursor:pointer" id="t-radio"><div class="stat-value">📻</div><div class="stat-label">Radio Streams</div></div>' +
+      '<div class="stat-card" style="cursor:pointer" id="t-cc"><div class="stat-value">📺</div><div class="stat-label">Created Channels</div></div>' +
+      '<div class="stat-card" style="cursor:pointer" id="t-ug"><div class="stat-value">👥</div><div class="stat-label">User Groups</div></div>' +
+      '<div class="stat-card" style="cursor:pointer" id="t-se"><div class="stat-value">⚠️</div><div class="stat-label">Stream Errors</div></div>' +
+      '<div class="stat-card" style="cursor:pointer" id="t-rtmp"><div class="stat-value">📡</div><div class="stat-label">RTMP Status</div></div>' +
+      '</div><div id="tool-detail"></div>';
+    $("#t-lc").onclick = async () => { const r = await api("/live-connections"); $("#tool-detail").innerHTML = "<h3>Live Connections (" + r.total + ")</h3><pre>" + JSON.stringify(r.connections, null, 2) + "</pre>"; };
+    $("#t-pm").onclick = async () => { const r = await api("/process-monitor"); $("#tool-detail").innerHTML = "<h3>Processes</h3><pre>" + JSON.stringify(r, null, 2) + "</pre>"; };
+    $("#t-prof").onclick = async () => { const r = await api("/profiles"); $("#tool-detail").innerHTML = "<h3>Transcoding Profiles</h3><pre>" + JSON.stringify(r.profiles, null, 2) + "</pre>"; };
+    $("#t-radio").onclick = async () => { const r = await api("/radios"); $("#tool-detail").innerHTML = "<h3>Radio Streams</h3><pre>" + JSON.stringify(r, null, 2) + "</pre>"; };
+    $("#t-cc").onclick = async () => { const r = await api("/created-channels"); $("#tool-detail").innerHTML = "<h3>Created Channels</h3><pre>" + JSON.stringify(r, null, 2) + "</pre>"; };
+    $("#t-ug").onclick = async () => { const r = await api("/user-groups"); $("#tool-detail").innerHTML = "<h3>User Groups</h3><pre>" + JSON.stringify(r.groups, null, 2) + "</pre>"; };
+    $("#t-se").onclick = async () => { const r = await api("/stream-errors"); $("#tool-detail").innerHTML = "<h3>Stream Errors</h3><pre>" + JSON.stringify(r, null, 2) + "</pre>"; };
+    $("#t-rtmp").onclick = async () => { const r = await api("/rtmp/status"); $("#tool-detail").innerHTML = "<h3>RTMP Status</h3><pre>" + JSON.stringify(r, null, 2) + "</pre>"; };
+  }
+
+  /* ——— Security ——— */
+  async function renderSecurity() {
+    const ips = await api("/security/blocked-ips");
+    const uas = await api("/security/blocked-user-agents");
+    const bf = await api("/security/bruteforce-blocked");
+    const isps = await api("/blocked-isps");
+    const c = $("#main-content");
+    c.innerHTML = '<h1 class="page-title">Security</h1><div class="stats-grid">' +
+      '<div class="stat-card"><div class="stat-value">' + (ips.ips||[]).length + '</div><div class="stat-label">Blocked IPs</div></div>' +
+      '<div class="stat-card"><div class="stat-value">' + (uas.patterns||[]).length + '</div><div class="stat-label">Blocked UAs</div></div>' +
+      '<div class="stat-card"><div class="stat-value">' + (bf.blocked_ips||[]).length + '</div><div class="stat-label">Brute-force Blocked</div></div>' +
+      '<div class="stat-card"><div class="stat-value">' + (isps.isps||[]).length + '</div><div class="stat-label">Blocked ISPs</div></div></div>' +
+      '<h3>Blocked IPs</h3><pre>' + JSON.stringify(ips.ips, null, 2) + '</pre>' +
+      '<h3>Blocked User Agents</h3><pre>' + JSON.stringify(uas.patterns, null, 2) + '</pre>' +
+      '<h3>Blocked ISPs</h3><pre>' + JSON.stringify(isps.isps, null, 2) + '</pre>';
+  }
+
+  /* ——— Logs ——— */
+  async function renderLogs() {
+    const c = $("#main-content");
+    c.innerHTML = '<h1 class="page-title">Logs</h1>' +
+      '<div class="toolbar"><button class="btn" id="l-stream">Stream Logs</button> <button class="btn" id="l-activity">Activity</button> <button class="btn" id="l-conn">Connections</button> <button class="btn" id="l-sys">System</button></div>' +
+      '<div id="log-content"></div>';
+    async function showStream() { const r = await api("/logs/stream?per_page=50"); $("#log-content").innerHTML = "<pre>" + JSON.stringify(r, null, 2) + "</pre>"; }
+    async function showActivity() { const r = await api("/logs/activity?per_page=50"); $("#log-content").innerHTML = "<pre>" + JSON.stringify(r, null, 2) + "</pre>"; }
+    async function showConn() { const r = await api("/logs/connections?per_page=50"); $("#log-content").innerHTML = "<pre>" + JSON.stringify(r, null, 2) + "</pre>"; }
+    async function showSys() { const r = await api("/logs/system"); $("#log-content").innerHTML = "<h3>Log files: " + (r.available||[]).join(", ") + "</h3><pre>" + (r.lines||[]).join("") + "</pre>"; }
+    $("#l-stream").onclick = showStream; $("#l-activity").onclick = showActivity; $("#l-conn").onclick = showConn; $("#l-sys").onclick = showSys;
+    await showStream();
+  }
+
+  /* ——— Backups ——— */
+  async function renderBackups() {
+    const data = await api("/backups");
+    const c = $("#main-content");
+    c.innerHTML = '<h1 class="page-title">Backups</h1><div class="toolbar"><button class="btn btn-primary" id="btn-backup-create">Create Backup</button></div>' +
+      '<div class="table-wrap"><table class="data-table"><thead><tr><th>Filename</th><th>Size</th><th>Created</th><th>Actions</th></tr></thead><tbody>' +
+      (data.backups||[]).map(b => "<tr><td>" + esc(b.filename) + "</td><td>" + (b.size/1024/1024).toFixed(2) + " MB</td><td>" + esc(b.created) + '</td><td><button class="btn btn-sm btn-danger" data-del-bk="' + b.filename + '">Delete</button></td></tr>').join("") +
+      '</tbody></table></div>';
+    $("#btn-backup-create").onclick = async () => { toast("Creating backup..."); const r = await api("/backups/create", {method:"POST"}); toast(r.status === "created" ? "Backup created: " + r.filename : "Error: " + (r.detail||r.status)); renderBackups(); };
+    $$("[data-del-bk]").forEach(b => b.onclick = async () => { await api("/backups/" + b.dataset.delBk, {method:"DELETE"}); toast("Deleted"); renderBackups(); });
+  }
+
+  /* ——— Diagnostics ——— */
+  async function renderDiagnostics() {
+    const data = await api("/diagnostics");
+    const c = $("#main-content");
+    c.innerHTML = '<h1 class="page-title">System Diagnostics</h1><div class="stats-grid">' +
+      '<div class="stat-card"><div class="stat-value">' + data.system.cpu_percent + '%</div><div class="stat-label">CPU Usage</div></div>' +
+      '<div class="stat-card"><div class="stat-value">' + data.memory.percent + '%</div><div class="stat-label">Memory Usage</div></div>' +
+      '<div class="stat-card"><div class="stat-value">' + data.disk.percent + '%</div><div class="stat-label">Disk Usage</div></div>' +
+      '<div class="stat-card"><div class="stat-value">' + (data.streaming.active||0) + '</div><div class="stat-label">Active Streams</div></div></div>' +
+      '<h3>System Info</h3><pre>' + JSON.stringify(data.system, null, 2) + '</pre>' +
+      '<h3>FFmpeg</h3><pre>' + JSON.stringify(data.ffmpeg, null, 2) + '</pre>' +
+      '<h3>Content Sizes</h3><pre>' + JSON.stringify(data.content_sizes, null, 2) + '</pre>' +
+      '<div class="toolbar"><button class="btn" id="btn-nginx-test">Test Nginx</button> <button class="btn" id="btn-nginx-reload">Reload Nginx</button> <button class="btn" id="btn-cert">Certificate Info</button> <button class="btn" id="btn-procs">Processes</button></div><div id="diag-detail"></div>';
+    $("#btn-nginx-test").onclick = async () => { const r = await api("/diagnostics/nginx/test",{method:"POST"}); $("#diag-detail").innerHTML = "<pre>" + esc(r.output||r.detail||JSON.stringify(r)) + "</pre>"; };
+    $("#btn-nginx-reload").onclick = async () => { const r = await api("/diagnostics/nginx/reload",{method:"POST"}); toast(r.status); };
+    $("#btn-cert").onclick = async () => { const r = await api("/diagnostics/certificates"); $("#diag-detail").innerHTML = "<pre>" + esc(r.info||r.detail||JSON.stringify(r)) + "</pre>"; };
+    $("#btn-procs").onclick = async () => { const r = await api("/diagnostics/processes"); $("#diag-detail").innerHTML = "<pre>" + JSON.stringify(r.processes, null, 2) + "</pre>"; };
+  }
+
+  /* ——— Tickets ——— */
+  async function renderTickets() {
+    const data = await api("/tickets");
+    const c = $("#main-content");
+    c.innerHTML = '<h1 class="page-title">Tickets</h1><div class="toolbar"><button class="btn btn-primary" id="btn-ticket-new">New Ticket</button></div>' +
+      '<div class="table-wrap"><table class="data-table"><thead><tr><th>ID</th><th>Subject</th><th>Priority</th><th>Status</th><th>Created</th><th>Actions</th></tr></thead><tbody>' +
+      (data.tickets||[]).map(t => "<tr><td>" + t.id + "</td><td>" + esc(t.subject) + "</td><td>" + esc(t.priority) + "</td><td>" + esc(t.status) + "</td><td>" + esc(t.created_at||"") + '</td><td><button class="btn btn-sm" data-view-tk="' + t.id + '">View</button></td></tr>').join("") +
+      '</tbody></table></div><div id="ticket-detail"></div>';
+    $("#btn-ticket-new").onclick = () => {
+      openModalForm("New Ticket","",null);
+      const body = $("#modal-form-body");
+      body.innerHTML = '<div class="field"><label>Subject</label><input name="subject" required /></div><div class="field"><label>Message</label><textarea name="message" rows="4"></textarea></div><div class="field"><label>Priority</label><select name="priority"><option>normal</option><option>high</option><option>low</option></select></div>';
+      $("#modal-form-save").onclick = async () => {
+        const s = body.querySelector("[name=subject]").value, m = body.querySelector("[name=message]").value, p = body.querySelector("[name=priority]").value;
+        await api("/tickets",{method:"POST",body:JSON.stringify({subject:s,message:m,priority:p})}); toast("Created"); closeModalForm(); renderTickets();
+      };
+    };
+    $$("[data-view-tk]").forEach(b => b.onclick = async () => { const t = await api("/tickets/" + b.dataset.viewTk); $("#ticket-detail").innerHTML = "<h3>" + esc(t.subject) + " [" + t.status + "]</h3><p>" + esc(t.message) + "</p><h4>Replies:</h4>" + (t.replies||[]).map(r => "<div style='border-left:3px solid var(--accent);padding-left:8px;margin:8px 0'><small>" + esc(r.by) + " at " + esc(r.at) + "</small><p>" + esc(r.message) + "</p></div>").join(""); });
+  }
+
+  /* ——— Router ——— */
+  function render() {
+    clearSelection();
+    setBreadcrumb();
+    const map = {
+      dashboard: renderDashboard,
+      streams: renderStreams,
+      users: renderUsers,
+      vod: renderVod,
+      categories: renderCategories,
+      bouquets: renderBouquets,
+      servers: renderServers,
+      epg: renderEpg,
+      devices: renderDevices,
+      providers: renderProviders,
+      resellers: renderResellers,
+      packages: renderPackages,
+      lines: renderLines,
+      tools: renderTools,
+      security: renderSecurity,
+      logs: renderLogs,
+      backups: renderBackups,
+      diagnostics: renderDiagnostics,
+      tickets: renderTickets,
+      settings: renderSettings
+    };
+    (map[state.section] || renderDashboard)().catch((e) => toast(e.message, "error"));
+  }
+
+  function navigate(section) {
+    state.section = section;
+    state.page = 1;
+    $$(".nav-item").forEach((el) => el.classList.toggle("active", el.dataset.nav === section));
+    const cur = (location.hash || "").replace(/^#/, "");
+    if (cur !== section) {
+      location.hash = section;
+      return;
+    }
+    render();
+  }
+
+  function initNav() {
+    $("#main-nav").innerHTML = NAV.map((n) =>
+      '<div class="nav-item" data-nav="' + n.id + '"><span class="nav-icon">' + n.icon + "</span>" + esc(n.label) + "</div>"
+    ).join("");
+    $$(".nav-item").forEach((el) => el.addEventListener("click", () => navigate(el.dataset.nav)));
+  }
+
+  $("#login-form").addEventListener("submit", async (ev) => {
+    ev.preventDefault();
+    const fd = new FormData(ev.target);
+    try {
+      const data = await fetch(API + "/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username: fd.get("username"), password: fd.get("password") })
+      }).then(async (r) => {
+        const t = await r.text();
+        let j; try { j = JSON.parse(t); } catch (_) { j = {}; }
+        if (!r.ok) throw new Error(j.detail || r.statusText);
+        return j;
+      });
+      localStorage.setItem(LS.access, data.access_token);
+      localStorage.setItem(LS.refresh, data.refresh_token);
+      localStorage.setItem(LS.user, data.username);
+      showApp(true);
+      $("#top-username").textContent = data.username;
+      initNav();
+      const h = (location.hash || "").replace(/^#/, "");
+      if (h && NAV.some((n) => n.id === h)) state.section = h;
+      navigate(state.section);
+      toast("Welcome back");
+    } catch (e) { toast(e.message, "error"); }
+  });
+
+  $("#btn-logout").addEventListener("click", logout);
+  $("#btn-sidebar").addEventListener("click", () => $("#sidebar").classList.toggle("open"));
+
+  $$("[data-close-modal]").forEach((b) => b.addEventListener("click", closeModalForm));
+  $("#modal-form").addEventListener("click", (ev) => { if (ev.target.id === "modal-form") closeModalForm(); });
+
+  $$("[data-close-confirm]").forEach((b) => b.addEventListener("click", closeConfirm));
+  $("#modal-confirm").addEventListener("click", (ev) => { if (ev.target.id === "modal-confirm") closeConfirm(); });
+  $("#modal-confirm-ok").addEventListener("click", () => { if (state.confirmHandler) state.confirmHandler(); });
+
+  window.addEventListener("hashchange", () => {
+    const h = (location.hash || "").replace(/^#/, "");
+    if (!getToken()) return;
+    if (h && NAV.some((n) => n.id === h)) {
+      state.section = h;
+      state.page = 1;
+      $$(".nav-item").forEach((el) => el.classList.toggle("active", el.dataset.nav === h));
+      render();
+    }
+  });
+
+  if (getToken()) {
+    showApp(true);
+    $("#top-username").textContent = localStorage.getItem(LS.user) || "Admin";
+    initNav();
+    const h = (location.hash || "").replace(/^#/, "");
+    if (h && NAV.some((n) => n.id === h)) state.section = h;
+    render();
+  }
+})();
+  </script>
+</body>
+</html>
