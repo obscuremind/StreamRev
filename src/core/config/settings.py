@@ -46,6 +46,15 @@ class Settings(BaseSettings):
 
     # GeoIP
     GEOIP_DB_PATH: str = ""
+    # Comma-separated ISO 3166-1 alpha-2 codes; empty = no country restriction (allow all).
+    STREAMING_ALLOW_COUNTRIES: str = ""
+
+    # Restream detection (X-Restream-Detect header)
+    STREAMING_LOG_RESTREAM_DETECT: bool = True
+    STREAMING_BLOCK_RESTREAM_DETECT: bool = False
+
+    # HMAC stream token validation (skew window around expiry epoch)
+    STREAMING_HMAC_MAX_SKEW_SECONDS: int = 300
 
     # Nginx
     NGINX_BIN: str = "/usr/sbin/nginx"
