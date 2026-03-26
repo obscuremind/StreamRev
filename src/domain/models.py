@@ -135,6 +135,11 @@ class Server(Base):
         back_populates="force_server",
         foreign_keys="Package.force_server_id",
     )
+    proxies: Mapped[List["Proxy"]] = relationship(
+        "Proxy",
+        back_populates="server",
+        foreign_keys="Proxy.server_id",
+    )
 
 
 class Stream(Base):
@@ -222,6 +227,7 @@ class User(Base):
     __table_args__ = (
         Index("ix_users_enabled", "enabled"),
         Index("ix_users_force_server_id", "force_server_id"),
+        Index("ix_users_member_group_id", "member_group_id"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -255,6 +261,9 @@ class User(Base):
     created_by_reseller_id: Mapped[Optional[int]] = mapped_column(
         Integer, ForeignKey("resellers.id", ondelete="SET NULL"), nullable=True
     )
+    member_group_id: Mapped[Optional[int]] = mapped_column(
+        Integer, ForeignKey("users_groups.group_id", ondelete="SET NULL"), nullable=True
+    )
 
     force_server: Mapped[Optional["Server"]] = relationship(
         "Server",
@@ -266,6 +275,16 @@ class User(Base):
     )
     activities: Mapped[List["UserActivity"]] = relationship(
         "UserActivity",
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )
+    member_group: Mapped[Optional["UserGroup"]] = relationship(
+        "UserGroup",
+        back_populates="users",
+        foreign_keys=[member_group_id],
+    )
+    enigma2_devices: Mapped[List["Enigma2Device"]] = relationship(
+        "Enigma2Device",
         back_populates="user",
         cascade="all, delete-orphan",
     )
@@ -643,3 +662,182 @@ class Setting(Base):
         nullable=False,
         default="string",
     )  # string / int / bool / json
+
+
+class AccessCode(Base):
+    """Alternative authentication codes (XC_VM access_codes)."""
+
+    __tablename__ = "access_codes"
+    __table_args__ = (
+        Index("ix_access_codes_enabled", "enabled"),
+        Index("ix_access_codes_type", "type"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    code: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
+    name: Mapped[str] = mapped_column(String(255), nullable=False, default="")
+    code_type: Mapped[int] = mapped_column("type", Integer, nullable=False, default=1)
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    max_connections: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    allowed_ips: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    allowed_uas: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    allowed_countries: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=_utcnow)
+
+
+class HmacKey(Base):
+    """HMAC keys for API token authentication."""
+
+    __tablename__ = "hmac_keys"
+    __table_args__ = (Index("ix_hmac_keys_enabled", "enabled"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    key: Mapped[str] = mapped_column(Text, nullable=False)
+    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    allowed_ips: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=_utcnow)
+
+
+class UserGroup(Base):
+    """Subscriber groups (users_groups)."""
+
+    __tablename__ = "users_groups"
+
+    group_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    group_name: Mapped[str] = mapped_column(String(255), nullable=False, default="")
+    can_delete: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    packages: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    users: Mapped[List["User"]] = relationship(
+        "User",
+        back_populates="member_group",
+        foreign_keys="User.member_group_id",
+    )
+
+
+class Enigma2Device(Base):
+    """Enigma2 device registry (token, MAC, status)."""
+
+    __tablename__ = "enigma2_devices"
+    __table_args__ = (
+        Index("ix_enigma2_devices_user_id", "user_id"),
+        Index("ix_enigma2_devices_mac", "mac"),
+        Index("ix_enigma2_devices_enabled", "enabled"),
+    )
+
+    device_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    mac: Mapped[str] = mapped_column(String(32), nullable=False)
+    original_mac: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    modem_mac: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    token: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    key_auth: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    local_ip: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    public_ip: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    enigma_version: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    cpu: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    version: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    lversion: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    dns: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    lock_device: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    watchdog_timeout: Mapped[int] = mapped_column(Integer, nullable=False, default=60)
+    last_updated: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    rc: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+
+    user: Mapped["User"] = relationship("User", back_populates="enigma2_devices")
+    actions: Mapped[List["Enigma2Action"]] = relationship(
+        "Enigma2Action",
+        back_populates="device",
+        cascade="all, delete-orphan",
+    )
+
+
+class Enigma2Action(Base):
+    """Pending command queue for Enigma2 devices."""
+
+    __tablename__ = "enigma2_actions"
+    __table_args__ = (Index("ix_enigma2_actions_device_id", "device_id"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    device_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("enigma2_devices.device_id", ondelete="CASCADE"), nullable=False
+    )
+    key: Mapped[str] = mapped_column(String(64), nullable=False)
+    command: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    command2: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    action_type: Mapped[Optional[str]] = mapped_column("type", String(64), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=_utcnow)
+
+    device: Mapped["Enigma2Device"] = relationship("Enigma2Device", back_populates="actions")
+
+
+class StreamType(Base):
+    """Stream type definitions (live / movie / radio, etc.)."""
+
+    __tablename__ = "stream_types"
+    __table_args__ = (Index("ix_stream_types_type_key", "type_key"),)
+
+    type_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    type_name: Mapped[str] = mapped_column(String(64), nullable=False, default="")
+    type_key: Mapped[str] = mapped_column(String(64), nullable=False, default="")
+    type_output: Mapped[str] = mapped_column(String(64), nullable=False, default="")
+    live: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+
+
+class Proxy(Base):
+    """HTTP proxies for upstream stream fetching."""
+
+    __tablename__ = "proxies"
+    __table_args__ = (
+        Index("ix_proxies_server_id", "server_id"),
+        Index("ix_proxies_enabled", "enabled"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    proxy_name: Mapped[str] = mapped_column(String(255), nullable=False, default="")
+    proxy_url: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    proxy_type: Mapped[str] = mapped_column(String(32), nullable=False, default="http")
+    proxy_username: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    proxy_password: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    server_id: Mapped[Optional[int]] = mapped_column(
+        Integer, ForeignKey("servers.id", ondelete="SET NULL"), nullable=True
+    )
+
+    server: Mapped[Optional["Server"]] = relationship(
+        "Server",
+        back_populates="proxies",
+        foreign_keys=[server_id],
+    )
+
+
+class BlockedUserAgent(Base):
+    """Blocked user-agent patterns."""
+
+    __tablename__ = "blocked_uas"
+    __table_args__ = (Index("ix_blocked_uas_enabled", "enabled"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    pattern: Mapped[str] = mapped_column(String(512), nullable=False)
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=_utcnow)
+
+
+class BlockedIP(Base):
+    """Persistent DB-backed blocked IPs."""
+
+    __tablename__ = "blocked_ips"
+    __table_args__ = (
+        Index("ix_blocked_ips_ip", "ip"),
+        Index("ix_blocked_ips_enabled", "enabled"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    ip: Mapped[str] = mapped_column(String(64), nullable=False)
+    reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=_utcnow)
