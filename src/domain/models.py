@@ -192,6 +192,9 @@ class Stream(Base):
     tv_archive_server_id: Mapped[Optional[int]] = mapped_column(
         Integer, ForeignKey("servers.id", ondelete="SET NULL"), nullable=True
     )
+    transcode_profile_id: Mapped[Optional[int]] = mapped_column(
+        Integer, ForeignKey("profiles.profile_id", ondelete="SET NULL"), nullable=True
+    )
     order: Mapped[int] = mapped_column("order", Integer, nullable=False, default=0)
 
     category: Mapped[Optional["StreamCategory"]] = relationship(
@@ -200,6 +203,10 @@ class Stream(Base):
     tv_archive_server: Mapped[Optional["Server"]] = relationship(
         "Server",
         foreign_keys=[tv_archive_server_id],
+    )
+    transcode_profile: Mapped[Optional["TranscodeProfile"]] = relationship(
+        "TranscodeProfile",
+        back_populates="streams",
     )
     server_streams: Mapped[List["ServerStream"]] = relationship(
         "ServerStream", back_populates="stream", cascade="all, delete-orphan"
@@ -287,6 +294,15 @@ class User(Base):
         "Enigma2Device",
         back_populates="user",
         cascade="all, delete-orphan",
+    )
+    mag_devices: Mapped[List["MagDevice"]] = relationship(
+        "MagDevice",
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )
+    tickets: Mapped[List["Ticket"]] = relationship(
+        "Ticket",
+        back_populates="user",
     )
 
 
@@ -841,3 +857,139 @@ class BlockedIP(Base):
     reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=_utcnow)
+
+
+class MagDevice(Base):
+    """MAG STB device registry (hardware separate from user account)."""
+
+    __tablename__ = "mag_devices"
+
+    mag_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    mac: Mapped[str] = mapped_column(String(32), nullable=False)
+    sn: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    model: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    ip: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    ver: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    stb_type: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    token: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    lock_device: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    last_updated: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+
+    user: Mapped["User"] = relationship("User", back_populates="mag_devices")
+
+
+class TranscodeProfile(Base):
+    """Transcoding profiles for streams."""
+
+    __tablename__ = "profiles"
+    __table_args__ = (Index("ix_profiles_enabled", "enabled"),)
+
+    profile_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    profile_name: Mapped[str] = mapped_column(String(255), nullable=False, default="")
+    profile_command: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    profile_type: Mapped[str] = mapped_column(String(32), nullable=False, default="live")
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+
+    streams: Mapped[List["Stream"]] = relationship(
+        "Stream",
+        back_populates="transcode_profile",
+    )
+
+
+class ClientLog(Base):
+    """Client-side event logs."""
+
+    __tablename__ = "client_logs"
+    __table_args__ = (
+        Index("ix_client_logs_user_id", "user_id"),
+        Index("ix_client_logs_date", "date"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    stream_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    event: Mapped[str] = mapped_column(String(128), nullable=False, default="")
+    ip: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    data: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    date: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=_utcnow)
+
+
+class Ticket(Base):
+    """Support tickets."""
+
+    __tablename__ = "tickets"
+    __table_args__ = (
+        Index("ix_tickets_status", "status"),
+        Index("ix_tickets_user_id", "user_id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    title: Mapped[str] = mapped_column(String(512), nullable=False, default="")
+    message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    status: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    user_id: Mapped[Optional[int]] = mapped_column(
+        Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    admin_reply: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    priority: Mapped[str] = mapped_column(String(32), nullable=False, default="normal")
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=_utcnow)
+    updated_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime, nullable=True, onupdate=_utcnow
+    )
+
+    user: Mapped[Optional["User"]] = relationship("User", back_populates="tickets")
+
+
+class BlockedASN(Base):
+    """ASN database for ISP/hosting detection."""
+
+    __tablename__ = "blocked_asns"
+    __table_args__ = (Index("ix_blocked_asns_blocked", "blocked"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    asn: Mapped[int] = mapped_column(Integer, nullable=False, unique=True)
+    isp: Mapped[Optional[str]] = mapped_column(String(256), nullable=True)
+    domain: Mapped[Optional[str]] = mapped_column(String(256), nullable=True)
+    country: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)
+    num_ips: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    asn_type: Mapped[Optional[str]] = mapped_column("type", String(64), nullable=True)
+    blocked: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+
+class BlockedISP(Base):
+    """Blocked ISP patterns."""
+
+    __tablename__ = "blocked_isps"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    isp_name: Mapped[str] = mapped_column(String(512), nullable=False)
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=_utcnow)
+
+
+class RegisteredUser(Base):
+    """Pending/registered users awaiting activation."""
+
+    __tablename__ = "reg_users"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    username: Mapped[str] = mapped_column(String(255), nullable=False)
+    password: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    email: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    ip: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    status: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=_utcnow)
+
+
+class Migration(Base):
+    """Database migration tracking."""
+
+    __tablename__ = "migrations"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    migration: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
+    applied_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=_utcnow)
