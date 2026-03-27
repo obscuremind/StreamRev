@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
@@ -79,6 +80,32 @@ def list_streams(
 @router.get("/stats")
 def stream_stats(db: Session = Depends(get_db), admin: User = Depends(get_current_admin)):
     return StreamService(db).get_stats()
+
+
+@router.get("/runtime")
+def stream_runtime(db: Session = Depends(get_db), admin: User = Depends(get_current_admin)):
+    svc = StreamService(db)
+    active = streaming_engine.get_active_streams()
+    rows = {}
+    for stream in svc.get_all(page=1, per_page=1000000)["items"]:
+        info = active.get(stream.id)
+        started_at = info.get("started_at") if info else None
+        uptime_seconds = None
+        if started_at:
+            try:
+                started = datetime.fromisoformat(started_at)
+                if started.tzinfo is None:
+                    started = started.replace(tzinfo=timezone.utc)
+                uptime_seconds = max(0, int((datetime.now(timezone.utc) - started).total_seconds()))
+            except ValueError:
+                uptime_seconds = None
+        rows[stream.id] = {
+            "running": bool(info and info.get("running")),
+            "pid": info.get("pid") if info else None,
+            "started_at": started_at,
+            "uptime_seconds": uptime_seconds,
+        }
+    return {"items": rows}
 
 
 @router.get("/search")

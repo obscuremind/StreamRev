@@ -349,6 +349,17 @@
     return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/"/g, "&quot;");
   }
 
+  function fmtDuration(seconds) {
+    if (seconds == null || Number.isNaN(+seconds)) return "—";
+    const sec = Math.max(0, Math.floor(+seconds));
+    const d = Math.floor(sec / 86400);
+    const h = Math.floor((sec % 86400) / 3600);
+    const m = Math.floor((sec % 3600) / 60);
+    const s = sec % 60;
+    if (d > 0) return d + "d " + String(h).padStart(2, "0") + "h";
+    return String(h).padStart(2, "0") + ":" + String(m).padStart(2, "0") + ":" + String(s).padStart(2, "0");
+  }
+
   function paginationHtml(total) {
     const pages = Math.max(1, Math.ceil(total / state.perPage) || 1);
     const p = Math.min(state.page, pages);
@@ -480,13 +491,18 @@
       '<button type="button" class="btn btn-primary" id="btn-stream-search">Search</button>' +
       '<button type="button" class="btn" id="btn-stream-new">+ New stream</button></div>' +
       '<div class="table-wrap"><table class="data-table"><thead><tr>' +
-      '<th><input type="checkbox" id="chk-all" /></th><th>ID</th><th>Name</th><th>Category</th><th>Enabled</th><th>Actions</th></tr></thead><tbody id="tbody"></tbody></table></div>' +
+      '<th><input type="checkbox" id="chk-all" /></th><th>ID</th><th>Name</th><th>Category</th><th>Enabled</th><th>Runtime</th><th>Uptime</th><th>Actions</th></tr></thead><tbody id="tbody"></tbody></table></div>' +
       paginationHtml(0);
 
     async function load() {
       let items, total;
       const searchVal = $("#stream-search").value.trim();
       try {
+        let runtime = {};
+        try {
+          const rr = await api("/streams/runtime");
+          runtime = (rr && rr.items) || {};
+        } catch (_) {}
         if (searchVal) {
           items = await api("/streams/search?q=" + encodeURIComponent(searchVal));
           total = items.length;
@@ -503,17 +519,20 @@
         }
         $("#tbody").innerHTML = items.map((row) => {
           const cat = state.categoriesCache.find((c) => c.id === row.category_id);
+          const rt = runtime[row.id] || {};
           return "<tr>" +
             '<td><input type="checkbox" class="row-chk" data-id="' + row.id + '"' + (state.selected.has(row.id) ? " checked" : "") + " /></td>" +
             "<td>" + row.id + "</td><td>" + esc(row.stream_display_name) + "</td><td>" + esc(cat ? cat.category_name : row.category_id) + "</td>" +
             "<td>" + (row.enabled ? '<span class="badge badge-on">On</span>' : '<span class="badge badge-off">Off</span>') + "</td>" +
+            "<td>" + (rt.running ? '<span class="badge badge-on">Running</span>' : '<span class="badge badge-off">Stopped</span>') + (rt.pid ? ' <span class="mono">PID ' + esc(rt.pid) + "</span>" : "") + "</td>" +
+            '<td class="mono">' + esc(fmtDuration(rt.uptime_seconds)) + "</td>" +
             '<td class="actions"><button type="button" class="btn btn-sm" data-edit="' + row.id + '">Edit</button> ' +
             '<button type="button" class="btn btn-sm" data-toggle="' + row.id + '">Toggle</button> ' +
             '<button type="button" class="btn btn-sm" data-start="' + row.id + '" title="Start stream">&#9654;</button> ' +
             '<button type="button" class="btn btn-sm" data-stop="' + row.id + '" title="Stop stream">&#9632;</button> ' +
             '<button type="button" class="btn btn-sm" data-restart="' + row.id + '" title="Restart stream">&#8635;</button> ' +
             '<button type="button" class="btn btn-sm btn-danger" data-del="' + row.id + '">Delete</button></td></tr>';
-        }).join("") || '<tr><td colspan="6" class="empty-state">No streams</td></tr>';
+        }).join("") || '<tr><td colspan="8" class="empty-state">No streams</td></tr>';
 
         $(".pagination").outerHTML = paginationHtml(total);
         bindPagination({ total, load });
@@ -644,8 +663,8 @@
       try {
         const r = id ? await api("/streams/" + id + "/probe", { method: "POST", body: JSON.stringify({ url }) }) : await api("/streams/1/probe", { method: "POST", body: JSON.stringify({ url }) });
         const res = body.querySelector("[name=probed_resolution]");
-        if (r.probe_result && r.probe_result.streams) {
-          const vs = r.probe_result.streams.find((s) => s.codec_type === "video");
+        if (r.probe && r.probe.streams) {
+          const vs = r.probe.streams.find((s) => s.codec_type === "video");
           if (vs) res.value = vs.width + "x" + vs.height;
           else res.value = "No video stream";
         } else res.value = "Probe returned no data";
@@ -656,7 +675,9 @@
     if (statusBtn && id) statusBtn.onclick = async () => {
       try {
         const r = await api("/streams/" + id + "/status");
-        toast("Stream " + id + ": " + (r.running ? "RUNNING (PID " + r.pid + ")" : "STOPPED"));
+        const pid = r.engine && r.engine.pid ? " (PID " + r.engine.pid + ")" : "";
+        const up = r.engine && r.engine.started_at ? ", uptime " + fmtDuration((Date.now() - Date.parse(r.engine.started_at)) / 1000) : "";
+        toast("Stream " + id + ": " + (r.running ? "RUNNING" + pid + up : "STOPPED"));
       } catch (e) { toast(e.message, "error"); }
     };
   }
