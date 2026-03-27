@@ -185,6 +185,11 @@ class Stream(Base):
     allow_record: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     probed_resolution: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     current_source: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    stream_status: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0
+    )  # 0 off, 1 on
+    stream_pid: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    stream_started_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     tv_archive: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     tv_archive_duration: Mapped[Optional[int]] = mapped_column(
         Integer, nullable=True

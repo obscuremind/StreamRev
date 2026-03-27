@@ -89,7 +89,7 @@ def stream_runtime(db: Session = Depends(get_db), admin: User = Depends(get_curr
     rows = {}
     for stream in svc.get_all(page=1, per_page=1000000)["items"]:
         info = active.get(stream.id)
-        started_at = info.get("started_at") if info else None
+        started_at = info.get("started_at") if info else (stream.stream_started_at.isoformat() if stream.stream_started_at else None)
         uptime_seconds = None
         if started_at:
             try:
@@ -100,8 +100,8 @@ def stream_runtime(db: Session = Depends(get_db), admin: User = Depends(get_curr
             except ValueError:
                 uptime_seconds = None
         rows[stream.id] = {
-            "running": bool(info and info.get("running")),
-            "pid": info.get("pid") if info else None,
+            "running": bool(info and info.get("running")) or stream.stream_status == 1,
+            "pid": info.get("pid") if info else stream.stream_pid,
             "started_at": started_at,
             "uptime_seconds": uptime_seconds,
         }
@@ -147,6 +147,10 @@ def start_stream_engine(
     )
     if pid is None:
         raise HTTPException(status_code=500, detail="Failed to start streaming process")
+    stream.stream_status = 1
+    stream.stream_pid = pid
+    stream.stream_started_at = datetime.now(timezone.utc)
+    db.commit()
     return {"status": "started", "pid": pid, "stream_id": stream_id}
 
 
@@ -158,6 +162,10 @@ def stop_stream_engine(
     if not stream:
         raise HTTPException(status_code=404, detail="Stream not found")
     stopped = streaming_engine.stop_stream(stream_id)
+    stream.stream_status = 0
+    stream.stream_pid = None
+    stream.stream_started_at = None
+    db.commit()
     return {"status": "stopped" if stopped else "not_running", "stream_id": stream_id}
 
 
@@ -181,6 +189,10 @@ def restart_stream_engine(
     )
     if pid is None:
         raise HTTPException(status_code=500, detail="Failed to restart streaming process")
+    stream.stream_status = 1
+    stream.stream_pid = pid
+    stream.stream_started_at = datetime.now(timezone.utc)
+    db.commit()
     return {"status": "restarted", "pid": pid, "stream_id": stream_id}
 
 
@@ -280,5 +292,8 @@ def _stream_to_dict(s) -> dict:
         "custom_sid": s.custom_sid,
         "probed_resolution": s.probed_resolution,
         "current_source": s.current_source,
+        "stream_status": s.stream_status,
+        "stream_pid": s.stream_pid,
+        "stream_started_at": s.stream_started_at.isoformat() if s.stream_started_at else None,
         "tv_archive_server_id": s.tv_archive_server_id,
     }
