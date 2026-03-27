@@ -67,22 +67,22 @@ class StreamingEngine:
         if stream_id in self._active_streams:
             return self._active_streams[stream_id].get("pid")
 
-        output_path = os.path.join(settings.CONTENT_DIR, "streams", str(stream_id))
-        os.makedirs(output_path, exist_ok=True)
+        stream_dir = os.path.join(settings.CONTENT_DIR, "streams", str(stream_id))
+        os.makedirs(stream_dir, exist_ok=True)
 
         if container == "ts":
-            out = f"pipe:1"
+            out = os.path.join(stream_dir, "stream.ts")
         elif container == "m3u8":
-            out = output_path
+            out = stream_dir
         else:
-            out = output_path
+            out = stream_dir
 
         cmd = self.get_ffmpeg_command(stream_id, source_url, out, container, custom_ffmpeg, read_native)
 
         try:
             proc = subprocess.Popen(
                 cmd,
-                stdout=subprocess.PIPE if container == "ts" else subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
                 stderr=subprocess.PIPE,
                 preexec_fn=os.setsid,
             )
@@ -93,7 +93,7 @@ class StreamingEngine:
                 "container": container,
                 "server_id": server_id,
                 "started_at": datetime.now(timezone.utc).isoformat(),
-                "output_path": output_path,
+                "output_path": out,
             }
             logger.info(f"Started stream {stream_id} (PID: {proc.pid}) from {source_url}")
             return proc.pid
