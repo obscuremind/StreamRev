@@ -166,7 +166,7 @@ async def root():
 @app.get("/panel/{path:path}", response_class=HTMLResponse)
 async def admin_panel(request: Request, path: str = ""):
     if templates:
-        return templates.TemplateResponse("admin/index.html", {"request": request, "settings": settings})
+        return templates.TemplateResponse(request, "admin/index.html", context={"settings": settings})
     return HTMLResponse(content="<h1>IPTV Panel</h1><p>Admin UI available at /panel/</p>")
 
 
