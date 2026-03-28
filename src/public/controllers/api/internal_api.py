@@ -222,13 +222,32 @@ def restore_images(auth=Depends(verify_server_key)):
 
 @router.post("/streams_ramdisk")
 def streams_ramdisk(auth=Depends(verify_server_key)):
-    return {"status": "not_implemented", "detail": "Ramdisk not configured"}
+    ramdisk_path = settings.TMP_DIR
+    configured = bool(ramdisk_path)
+    exists = os.path.isdir(ramdisk_path) if configured else False
+    writable = os.access(ramdisk_path, os.W_OK) if exists else False
+    return {
+        "status": "ok" if (configured and exists and writable) else "warning",
+        "configured": configured,
+        "path": ramdisk_path,
+        "exists": exists,
+        "writable": writable,
+    }
 
 
 # RTMP
 @router.get("/rtmp_stats")
 def rtmp_stats(auth=Depends(verify_server_key)):
-    return {"status": "ok", "active_rtmp": 0, "detail": "RTMP stats placeholder"}
+    active = []
+    for proc in psutil.process_iter(["pid", "name", "cmdline"]):
+        try:
+            cmdline = " ".join(proc.info.get("cmdline") or [])
+            name = (proc.info.get("name") or "").lower()
+            if "ffmpeg" in name and "rtmp" in cmdline.lower():
+                active.append({"pid": proc.info["pid"], "cmdline": cmdline[:512]})
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            continue
+    return {"status": "ok", "active_rtmp": len(active), "processes": active}
 
 
 @router.post("/rtmp_kill")

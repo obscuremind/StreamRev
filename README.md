@@ -109,6 +109,10 @@ cmd:create-admin     Create admin user
 cmd:reset-admin      Reset admin password
 cmd:import-epg       Import EPG from XMLTV URL
 cmd:stats            Show system statistics
+
+# XC_VM compatibility helpers
+service              Show service status wrapper
+update               Run update/migration wrapper
 ```
 
 ## API Endpoints
@@ -168,6 +172,16 @@ cmd:stats            Show system statistics
 | GET | `/series/{user}/{pass}/{episode_id}.mp4` | Series playback |
 | GET | `/hls/{stream_id}/index.m3u8` | HLS playlist |
 | GET | `/hls/{stream_id}/{segment}.ts` | HLS segment |
+
+## XC_VM Compatibility
+
+StreamRev now ships XC_VM-aligned runtime directories and entrypoints to simplify migration:
+
+- Runtime dirs under `src/`: `backups`, `content`, `signals`, `tmp`, `www`
+- Compatibility dirs: `includes`, `infrastructure`, `migrations`, `bin`, `ministra`
+- Compatibility entrypoints: `python -m src.bootstrap`, `python -m src.service`, `python -m src.update`
+
+This keeps StreamRev architecture in Python while preserving XC_VM-like operational layout.
 
 ## Project Structure
 

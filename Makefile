@@ -7,7 +7,7 @@ SRC_DIR := ./src
 PORT := 8000
 WORKERS := 4
 
-.PHONY: help install dev run test lint clean build build-lb docker
+.PHONY: help install dev run test lint clean build build-lb migrate create-admin stats service update docker
 
 help:
 	@echo "StreamRev - IPTV Panel"
@@ -58,6 +58,13 @@ create-admin:
 stats:
 	PYTHONPATH=$(PWD) $(PYTHON) -m src.cli.console cmd:stats
 
+
+service:
+	PYTHONPATH=$(PWD) $(PYTHON) -m src.service status
+
+update:
+	PYTHONPATH=$(PWD) $(PYTHON) -m src.update
+
 # Build MAIN distribution (full panel)
 build: clean
 	@echo "==> Building MAIN distribution"
@@ -67,7 +74,7 @@ build: clean
 	@cp install.py $(DIST_DIR)/streamrev/
 	@cp README.md $(DIST_DIR)/streamrev/
 	@cp Makefile $(DIST_DIR)/streamrev/
-	@cp .env.example $(DIST_DIR)/streamrev/
+	@if [ -f .env.example ]; then cp .env.example $(DIST_DIR)/streamrev/; fi
 	@find $(DIST_DIR) -name __pycache__ -type d -exec rm -rf {} + 2>/dev/null || true
 	@find $(DIST_DIR) -name "*.pyc" -delete 2>/dev/null || true
 	@cd $(DIST_DIR) && tar -czf streamrev.tar.gz streamrev/
