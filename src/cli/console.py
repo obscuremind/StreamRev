@@ -1,1122 +1,1619 @@
-#!/usr/bin/env python3
 """
-IPTV Panel CLI - Console command runner (XC_VM-equivalent surface).
+StreamRev CLI Console
+=====================
+
+Central command dispatcher for StreamRev administrative and cron tasks.
+
 Usage:
-    python -m src.cli.console <command> [args]
+    python -m src.cli.console <command> [args...]
 
-Service / ops:
-    cmd:service:start|stop|restart|status  - Manage uvicorn (panel HTTP)
-    cmd:scanner       - Probe provider domains from stream sources
-    cmd:balancer      - Report load-balancer / server assignment state
-    cmd:archive       - Prune TV archive directories past per-stream retention
-    cmd:ondemand      - start|stop|status <stream_id> for on-demand ffmpeg
-    cmd:record        - List streams allowed to record and archive disk usage
-    cmd:thumbnail     - Fetch channel icons into per-stream thumb files
-    cmd:certbot       - Check TLS cert on disk (openssl); optional certbot renew
-    cmd:signals       - List or clear signal files under data/signals
-    cmd:tools         - rescue | ports | access-codes
+Commands are prefixed:
+    cmd:*    — Interactive admin commands
+    cron:*   — Scheduled cron tasks
 
-Cron:
-    cron:activity, cron:stats, cron:vod, cron:series, cron:errors,
-    cron:lines-logs, cron:streams-logs, cron:providers, cron:certbot, cron:tmp
-    (plus existing cron:* tasks)
+Examples:
+    python -m src.cli.console cmd:connections
+    python -m src.cli.console cmd:kill 42
+    python -m src.cli.console cmd:kill user 5
+    python -m src.cli.console cmd:kill ip 10.0.0.1
+    python -m src.cli.console cmd:kill all
+    python -m src.cli.console cmd:queue
+    python -m src.cli.console cmd:queue add 123
+    python -m src.cli.console cmd:queue clear
+    python -m src.cli.console cmd:audit
+    python -m src.cli.console cmd:profiles
+    python -m src.cli.console cmd:rtmp
+    python -m src.cli.console cmd:sessions
+    python -m src.cli.console cmd:hmac
+    python -m src.cli.console cmd:proxies
+    python -m src.cli.console cmd:db tables
+    python -m src.cli.console cmd:db stats
+    python -m src.cli.console cmd:cache:info
+    python -m src.cli.console cmd:security
+    python -m src.cli.console cmd:tmdb update-movies
+    python -m src.cli.console cmd:tmdb update-series
+    python -m src.cli.console cmd:theft scan
+    python -m src.cli.console cmd:theft alerts
+    python -m src.cli.console cmd:fingerprint
+    python -m src.cli.console cmd:watch scan [/path]
+    python -m src.cli.console cmd:archive
+    python -m src.cli.console cron:queue
+    python -m src.cli.console cron:connections
+    python -m src.cli.console cron:recordings
+    python -m src.cli.console cron:audit
+    python -m src.cli.console cron:theft
+    python -m src.cli.console cron:tmdb
+    python -m src.cli.console cron:fingerprint
+    python -m src.cli.console cron:watch
+    python -m src.cli.console cron:archive
+    python -m src.cli.console cron:registrations
 """
-import glob
-import json
+
 import os
-import signal
-import shutil
-import subprocess
 import sys
-import time
+import json
+import hashlib
+import secrets
+import subprocess
+from datetime import datetime, timedelta
+from typing import Any, Dict, List, Optional
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-
-from src.core.config import settings
-from src.core.database import SessionLocal, Base, engine
 from src.core.logging.logger import logger
 
 
+# ---------------------------------------------------------------------------
+# Database helper
+# ---------------------------------------------------------------------------
+
 def get_db():
-    db = SessionLocal()
-    try:
-        return db
-    except Exception:
-        db.close()
-        raise
+    """Return a new SQLAlchemy Session (caller must close)."""
+    from src.core.database import SessionLocal
+    return SessionLocal()
 
 
-def cmd_startup():
-    logger.info("Starting IPTV Panel services...")
-    Base.metadata.create_all(bind=engine)
-    logger.info("Database tables verified")
-    logger.info("Startup complete")
+# ---------------------------------------------------------------------------
+# Utility helpers
+# ---------------------------------------------------------------------------
+
+def _utcnow() -> datetime:
+    return datetime.utcnow()
 
 
-def cmd_monitor():
-    from src.streaming.engine import streaming_engine
-    stats = streaming_engine.get_stats()
-    print(f"Active streams: {stats['active']}")
-    print(f"Total tracked: {stats['total_tracked']}")
-    print(f"Failed: {stats['failed']}")
-
-    from src.core.process.manager import ProcessManager
-    sys_info = ProcessManager.get_system_info()
-    print(f"\nCPU: {sys_info['cpu_percent']}%")
-    print(f"Memory: {sys_info['memory']['percent']}%")
-    print(f"Disk: {sys_info['disk']['percent']}%")
+def _trunc(text: Optional[str], length: int = 40) -> str:
+    """Truncate a string for display."""
+    if not text:
+        return ""
+    return (text[:length] + "...") if len(text) > length else text
 
 
-def cmd_watchdog():
-    from src.streaming.engine import streaming_engine
-    logger.info("Watchdog: Checking stream health...")
-    active = streaming_engine.get_active_streams()
-    restarted = 0
-    for sid, info in active.items():
-        if not info.get("running"):
-            logger.warning(f"Stream {sid} is down, restarting...")
-            streaming_engine.restart_stream(sid)
-            restarted += 1
-    logger.info(f"Watchdog complete: {restarted} streams restarted")
+def _print_table(headers: List[str], rows: List[List[Any]]) -> None:
+    """Print a simple ASCII table."""
+    if not rows:
+        print("  (no data)")
+        return
+    col_widths = [len(h) for h in headers]
+    for row in rows:
+        for i, cell in enumerate(row):
+            col_widths[i] = max(col_widths[i], len(str(cell)))
+    fmt = "  ".join(f"{{:<{w}}}" for w in col_widths)
+    print(fmt.format(*headers))
+    print(fmt.format(*["-" * w for w in col_widths]))
+    for row in rows:
+        print(fmt.format(*[str(c) for c in row]))
 
 
-def cron_streams():
-    logger.info("Running streams cron...")
+# ===========================================================================
+#  CMD: CONNECTIONS — show live connections
+# ===========================================================================
+
+def cmd_connections(args: List[str]) -> None:
+    """Show all active (live) connections."""
     db = get_db()
     try:
-        from src.domain.stream.service import StreamService
-        svc = StreamService(db)
-        stats = svc.get_stats()
-        logger.info(f"Stream stats: {stats}")
+        from src.domain.models import Line, User, Stream
+
+        lines = db.query(Line).all()
+        print(f"Active connections: {len(lines)}")
+        if not lines:
+            return
+
+        headers = ["LineID", "User", "Stream", "IP", "UserAgent", "Since"]
+        rows = []
+        for line in lines:
+            user = db.query(User).filter(User.id == line.user_id).first()
+            stream = db.query(Stream).filter(Stream.id == line.stream_id).first()
+            uname = user.username if user else "?"
+            sname = stream.stream_display_name if stream else "?"
+            ua = _trunc(line.user_agent, 40) if hasattr(line, "user_agent") else ""
+            since = str(line.date) if hasattr(line, "date") else ""
+            rows.append([line.id, uname, sname, getattr(line, "user_ip", ""), ua, since])
+
+        _print_table(headers, rows)
+        logger.info(f"cmd:connections — listed {len(lines)} active connections")
     finally:
         db.close()
 
 
-def cron_users():
-    logger.info("Running users cron...")
+# ===========================================================================
+#  CMD: KILL — kill connections
+# ===========================================================================
+
+def cmd_kill(args: List[str]) -> None:
+    """
+    Kill connections.
+        cmd:kill <line_id>
+        cmd:kill user <user_id>
+        cmd:kill ip <ip_address>
+        cmd:kill all
+    """
     db = get_db()
     try:
-        from src.domain.user.service import UserService
-        from src.domain.models import User
-        from datetime import datetime, timezone
-        svc = UserService(db)
-        now = datetime.now(timezone.utc)
-        expired = db.query(User).filter(User.exp_date <= now, User.enabled == True).all()
-        for user in expired:
-            user.enabled = False
-            logger.info(f"Disabled expired user: {user.username}")
-        db.commit()
-        logger.info(f"Users cron complete. Disabled {len(expired)} expired users.")
-    finally:
-        db.close()
+        from src.domain.models import Line
 
+        if not args:
+            print("Usage: cmd:kill <line_id> | cmd:kill user <uid> | cmd:kill ip <ip> | cmd:kill all")
+            return
 
-def cron_epg():
-    logger.info("Running EPG cron...")
-    db = get_db()
-    try:
-        import json
+        mode = args[0].lower()
+        killed = 0
 
-        from src.domain.epg.service import EpgService
-        from src.domain.server.settings_service import SettingsService
+        if mode == "all":
+            killed = db.query(Line).delete()
+            db.commit()
+            print(f"Killed ALL connections ({killed})")
+            logger.warning(f"cmd:kill all — removed {killed} connections")
 
-        svc = EpgService(db)
-        cleared = svc.clear_old(days=7)
+        elif mode == "user":
+            if len(args) < 2:
+                print("Usage: cmd:kill user <user_id>")
+                return
+            user_id = int(args[1])
+            killed = db.query(Line).filter(Line.user_id == user_id).delete()
+            db.commit()
+            print(f"Killed {killed} connection(s) for user_id={user_id}")
+            logger.info(f"cmd:kill user {user_id} — removed {killed} connections")
 
-        settings_svc = SettingsService(db)
-        sources = settings_svc.get("epg_sources", default=[])
-        if isinstance(sources, str):
+        elif mode == "ip":
+            if len(args) < 2:
+                print("Usage: cmd:kill ip <ip_address>")
+                return
+            ip = args[1]
+            killed = db.query(Line).filter(Line.user_ip == ip).delete()
+            db.commit()
+            print(f"Killed {killed} connection(s) from IP={ip}")
+            logger.info(f"cmd:kill ip {ip} — removed {killed} connections")
+
+        else:
+            # Treat as line_id
             try:
-                sources = json.loads(sources)
-            except (json.JSONDecodeError, TypeError):
-                sources = []
-        if not isinstance(sources, list):
-            sources = []
-
-        total_imported = 0
-        for item in sources:
-            if isinstance(item, str):
-                url = item.strip()
-            elif isinstance(item, dict):
-                url = (item.get("url") or "").strip()
+                line_id = int(mode)
+            except ValueError:
+                print(f"Unknown kill target: {mode}")
+                return
+            line = db.query(Line).filter(Line.id == line_id).first()
+            if line:
+                db.delete(line)
+                db.commit()
+                print(f"Killed connection line_id={line_id}")
+                logger.info(f"cmd:kill {line_id} — connection removed")
             else:
-                url = ""
-            if not url:
-                continue
-            try:
-                n = svc.fetch_and_import(url)
-                total_imported += n
-                logger.info(f"EPG imported {n} programmes from {url}")
-            except Exception as e:
-                logger.warning(f"EPG fetch failed for {url}: {e}")
+                print(f"Line {line_id} not found")
 
-        linked = svc.link_channels()
-        logger.info(
-            f"EPG cron complete. Cleared {cleared} old entries, "
-            f"imported {total_imported} programmes, linked {linked} channel rows."
-        )
+    except Exception as exc:
+        db.rollback()
+        logger.error(f"cmd:kill error: {exc}")
+        print(f"Error: {exc}")
     finally:
         db.close()
 
 
-def cron_cleanup():
-    import time
-    from datetime import datetime, timedelta
+# ===========================================================================
+#  CMD: QUEUE — show/manage stream queue
+# ===========================================================================
 
-    from src.domain.models import Line, StreamLog
-
-    logger.info("Running cleanup cron...")
+def cmd_queue(args: List[str]) -> None:
+    """
+    Manage the stream processing queue.
+        cmd:queue             — list queue items
+        cmd:queue add <sid>   — add stream to queue
+        cmd:queue clear       — clear completed/failed items
+    """
     db = get_db()
     try:
-        cutoff = datetime.utcnow() - timedelta(hours=24)
-        q = db.query(Line).filter(Line.date < cutoff)
-        stale_count = q.count()
-        q.delete(synchronize_session=False)
-        db.commit()
-        logger.info(f"Removed {stale_count} stale line(s) older than 24h.")
+        from src.domain.models import StreamQueue, Stream
 
-        removed_tmp = 0
-        tmp_dir = settings.TMP_DIR
-        if os.path.isdir(tmp_dir):
-            threshold = time.time() - 86400
-            for root, _dirs, files in os.walk(tmp_dir):
-                for name in files:
-                    path = os.path.join(root, name)
+        if not args:
+            # List
+            items = db.query(StreamQueue).order_by(StreamQueue.created_at.desc()).limit(100).all()
+            print(f"Stream queue items: {len(items)}")
+            headers = ["ID", "StreamID", "Stream", "Status", "Priority", "Created", "Error"]
+            rows = []
+            for item in items:
+                stream = db.query(Stream).filter(Stream.id == item.stream_id).first()
+                sname = _trunc(stream.stream_display_name, 30) if stream else "?"
+                err = _trunc(item.error_message, 30) if item.error_message else ""
+                rows.append([
+                    item.id,
+                    item.stream_id,
+                    sname,
+                    item.status,
+                    item.priority,
+                    str(item.created_at)[:19],
+                    err,
+                ])
+            _print_table(headers, rows)
+            return
+
+        sub = args[0].lower()
+
+        if sub == "add":
+            if len(args) < 2:
+                print("Usage: cmd:queue add <stream_id>")
+                return
+            stream_id = int(args[1])
+            stream = db.query(Stream).filter(Stream.id == stream_id).first()
+            if not stream:
+                print(f"Stream {stream_id} not found")
+                return
+            entry = StreamQueue(
+                stream_id=stream_id,
+                status="pending",
+                priority=0,
+                created_at=_utcnow(),
+            )
+            db.add(entry)
+            db.commit()
+            print(f"Added stream {stream_id} ({stream.stream_display_name}) to queue (id={entry.id})")
+            logger.info(f"cmd:queue add — stream {stream_id} queued")
+
+        elif sub == "clear":
+            cleared = db.query(StreamQueue).filter(
+                StreamQueue.status.in_(["completed", "failed"])
+            ).delete(synchronize_session="fetch")
+            db.commit()
+            print(f"Cleared {cleared} completed/failed queue item(s)")
+            logger.info(f"cmd:queue clear — removed {cleared} items")
+
+        else:
+            print(f"Unknown queue sub-command: {sub}")
+
+    except Exception as exc:
+        db.rollback()
+        logger.error(f"cmd:queue error: {exc}")
+        print(f"Error: {exc}")
+    finally:
+        db.close()
+
+
+# ===========================================================================
+#  CMD: AUDIT — show recent audit log entries
+# ===========================================================================
+
+def cmd_audit(args: List[str]) -> None:
+    """Show recent audit log entries."""
+    db = get_db()
+    try:
+        from src.domain.models import AuditLog
+
+        limit = 50
+        if args:
+            try:
+                limit = int(args[0])
+            except ValueError:
+                pass
+
+        entries = db.query(AuditLog).order_by(AuditLog.id.desc()).limit(limit).all()
+        print(f"Recent audit log entries (last {limit}):")
+        headers = ["ID", "Action", "Admin", "Target", "IP", "Timestamp"]
+        rows = []
+        for e in entries:
+            rows.append([
+                e.id,
+                _trunc(getattr(e, "action", ""), 25),
+                getattr(e, "admin_id", ""),
+                _trunc(getattr(e, "target", ""), 30),
+                getattr(e, "ip_address", ""),
+                str(getattr(e, "created_at", ""))[:19],
+            ])
+        _print_table(headers, rows)
+        logger.info(f"cmd:audit — listed {len(entries)} entries")
+    finally:
+        db.close()
+
+
+# ===========================================================================
+#  CMD: PROFILES — list transcoding profiles
+# ===========================================================================
+
+def cmd_profiles(args: List[str]) -> None:
+    """List all transcoding profiles."""
+    db = get_db()
+    try:
+        from src.domain.models import TranscodingProfile
+
+        profiles = db.query(TranscodingProfile).order_by(TranscodingProfile.id).all()
+        print(f"Transcoding profiles: {len(profiles)}")
+        headers = ["ID", "Name", "Cmd", "Enabled"]
+        rows = []
+        for p in profiles:
+            rows.append([
+                p.id,
+                getattr(p, "profile_name", ""),
+                _trunc(getattr(p, "profile_command", ""), 60),
+                "Yes" if getattr(p, "enabled", False) else "No",
+            ])
+        _print_table(headers, rows)
+        logger.info(f"cmd:profiles — listed {len(profiles)} profiles")
+    finally:
+        db.close()
+
+
+# ===========================================================================
+#  CMD: RTMP — show RTMP / streaming engine stats
+# ===========================================================================
+
+def cmd_rtmp(args: List[str]) -> None:
+    """Show RTMP stats from the streaming engine."""
+    db = get_db()
+    try:
+        from src.domain.models import Stream, Server, Line
+
+        live_streams = db.query(Stream).filter(Stream.enabled == True, Stream.stream_type == 1).count()
+        total_streams = db.query(Stream).count()
+        active_conns = db.query(Line).count()
+        servers = db.query(Server).all()
+
+        print("RTMP / Streaming Engine Stats")
+        print(f"  Total streams:      {total_streams}")
+        print(f"  Live streams:       {live_streams}")
+        print(f"  Active connections: {active_conns}")
+        print()
+
+        if servers:
+            print("Servers:")
+            headers = ["ID", "Name", "IP", "Status", "Clients"]
+            rows = []
+            for s in servers:
+                rows.append([
+                    s.id,
+                    getattr(s, "server_name", ""),
+                    getattr(s, "server_ip", ""),
+                    getattr(s, "status", "unknown"),
+                    getattr(s, "total_clients", 0),
+                ])
+            _print_table(headers, rows)
+
+        # Try to get RTMP stats from nginx-rtmp stat endpoint
+        try:
+            from src.core.config import settings
+            rtmp_stat_url = getattr(settings, "RTMP_STAT_URL", "http://127.0.0.1:8080/stat")
+            import urllib.request
+            with urllib.request.urlopen(rtmp_stat_url, timeout=3) as resp:
+                data = resp.read().decode()
+                print(f"\nRTMP stat endpoint ({rtmp_stat_url}): {len(data)} bytes received")
+        except Exception:
+            print("\n  (RTMP stat endpoint not reachable)")
+
+        logger.info("cmd:rtmp — displayed streaming stats")
+    finally:
+        db.close()
+
+
+# ===========================================================================
+#  CMD: SESSIONS — list active admin/reseller sessions
+# ===========================================================================
+
+def cmd_sessions(args: List[str]) -> None:
+    """List active admin and reseller sessions."""
+    db = get_db()
+    try:
+        from src.domain.models import AdminSession
+
+        sessions = db.query(AdminSession).order_by(AdminSession.id.desc()).limit(100).all()
+        print(f"Active sessions: {len(sessions)}")
+        headers = ["ID", "AdminID", "IP", "UserAgent", "Created", "Expires"]
+        rows = []
+        for s in sessions:
+            rows.append([
+                s.id,
+                getattr(s, "admin_id", ""),
+                getattr(s, "ip_address", ""),
+                _trunc(getattr(s, "user_agent", ""), 30),
+                str(getattr(s, "created_at", ""))[:19],
+                str(getattr(s, "expires_at", ""))[:19],
+            ])
+        _print_table(headers, rows)
+        logger.info(f"cmd:sessions — listed {len(sessions)} sessions")
+    finally:
+        db.close()
+
+
+# ===========================================================================
+#  CMD: HMAC — list / generate HMAC keys
+# ===========================================================================
+
+def cmd_hmac(args: List[str]) -> None:
+    """
+    HMAC key management.
+        cmd:hmac            — list existing keys
+        cmd:hmac generate   — generate a new key
+    """
+    db = get_db()
+    try:
+        from src.domain.models import HmacKey
+
+        if args and args[0].lower() == "generate":
+            new_key = secrets.token_hex(32)
+            entry = HmacKey(
+                key_value=new_key,
+                description=f"Generated via CLI at {_utcnow().isoformat()}",
+                enabled=True,
+                created_at=_utcnow(),
+            )
+            db.add(entry)
+            db.commit()
+            print(f"Generated new HMAC key: {new_key} (id={entry.id})")
+            logger.info(f"cmd:hmac generate — created key id={entry.id}")
+            return
+
+        keys = db.query(HmacKey).order_by(HmacKey.id).all()
+        print(f"HMAC keys: {len(keys)}")
+        headers = ["ID", "Key", "Description", "Enabled", "Created"]
+        rows = []
+        for k in keys:
+            rows.append([
+                k.id,
+                _trunc(k.key_value, 20),
+                _trunc(getattr(k, "description", ""), 30),
+                "Yes" if getattr(k, "enabled", False) else "No",
+                str(getattr(k, "created_at", ""))[:19],
+            ])
+        _print_table(headers, rows)
+        logger.info(f"cmd:hmac — listed {len(keys)} keys")
+    except Exception as exc:
+        db.rollback()
+        logger.error(f"cmd:hmac error: {exc}")
+        print(f"Error: {exc}")
+    finally:
+        db.close()
+
+
+# ===========================================================================
+#  CMD: PROXIES — list / test proxies
+# ===========================================================================
+
+def cmd_proxies(args: List[str]) -> None:
+    """
+    Proxy management.
+        cmd:proxies          — list proxies
+        cmd:proxies test     — test all proxies
+    """
+    db = get_db()
+    try:
+        from src.domain.models import Proxy
+
+        proxies = db.query(Proxy).order_by(Proxy.id).all()
+
+        if args and args[0].lower() == "test":
+            print(f"Testing {len(proxies)} proxies...")
+            for p in proxies:
+                proxy_url = f"{p.proxy_type}://{p.proxy_ip}:{p.proxy_port}"
+                try:
+                    import urllib.request
+                    proxy_handler = urllib.request.ProxyHandler({
+                        "http": proxy_url,
+                        "https": proxy_url,
+                    })
+                    opener = urllib.request.build_opener(proxy_handler)
+                    opener.open("http://httpbin.org/ip", timeout=5)
+                    status = "OK"
+                except Exception:
+                    status = "FAIL"
+                print(f"  [{status}] {proxy_url}")
+            logger.info(f"cmd:proxies test — tested {len(proxies)} proxies")
+            return
+
+        print(f"Proxies: {len(proxies)}")
+        headers = ["ID", "Type", "IP", "Port", "Username", "Enabled"]
+        rows = []
+        for p in proxies:
+            rows.append([
+                p.id,
+                getattr(p, "proxy_type", "http"),
+                getattr(p, "proxy_ip", ""),
+                getattr(p, "proxy_port", ""),
+                _trunc(getattr(p, "proxy_username", ""), 15),
+                "Yes" if getattr(p, "enabled", True) else "No",
+            ])
+        _print_table(headers, rows)
+        logger.info(f"cmd:proxies — listed {len(proxies)} proxies")
+    finally:
+        db.close()
+
+
+# ===========================================================================
+#  CMD: DB — database info
+# ===========================================================================
+
+def cmd_db(args: List[str]) -> None:
+    """
+    Database information.
+        cmd:db tables   — list tables and row counts
+        cmd:db stats    — database size and statistics
+    """
+    db = get_db()
+    try:
+        from sqlalchemy import text, inspect
+
+        engine = db.get_bind()
+
+        if not args:
+            print("Usage: cmd:db tables | cmd:db stats")
+            return
+
+        sub = args[0].lower()
+
+        if sub == "tables":
+            inspector = inspect(engine)
+            table_names = inspector.get_table_names()
+            print(f"Database tables: {len(table_names)}")
+            headers = ["Table", "Rows"]
+            rows = []
+            for t in sorted(table_names):
+                try:
+                    result = db.execute(text(f"SELECT COUNT(*) FROM `{t}`"))
+                    count = result.scalar()
+                except Exception:
+                    count = "?"
+                rows.append([t, count])
+            _print_table(headers, rows)
+            logger.info(f"cmd:db tables — listed {len(table_names)} tables")
+
+        elif sub == "stats":
+            print("Database Statistics:")
+            try:
+                # MySQL / MariaDB
+                result = db.execute(text(
+                    "SELECT table_schema, "
+                    "ROUND(SUM(data_length + index_length) / 1024 / 1024, 2) AS size_mb, "
+                    "SUM(table_rows) AS total_rows "
+                    "FROM information_schema.tables "
+                    "WHERE table_schema = DATABASE() "
+                    "GROUP BY table_schema"
+                ))
+                row = result.fetchone()
+                if row:
+                    print(f"  Schema:     {row[0]}")
+                    print(f"  Size:       {row[1]} MB")
+                    print(f"  Total rows: {row[2]}")
+            except Exception:
+                # SQLite fallback
+                try:
+                    result = db.execute(text("SELECT page_count * page_size FROM pragma_page_count(), pragma_page_size()"))
+                    size = result.scalar()
+                    print(f"  Database size: {size / 1024:.1f} KB" if size else "  Database size: unknown")
+                except Exception:
+                    print("  Could not determine database statistics")
+
+            inspector = inspect(engine)
+            table_count = len(inspector.get_table_names())
+            print(f"  Tables:     {table_count}")
+            logger.info("cmd:db stats — displayed database statistics")
+
+        else:
+            print(f"Unknown db sub-command: {sub}")
+
+    finally:
+        db.close()
+
+
+# ===========================================================================
+#  CMD: CACHE:INFO — Redis cache info
+# ===========================================================================
+
+def cmd_cache_info(args: List[str]) -> None:
+    """Show Redis cache info and key count."""
+    try:
+        from src.core.cache.redis_cache import redis_client
+
+        if redis_client is None:
+            print("Redis not configured / not connected")
+            return
+
+        info = redis_client.info()
+        dbsize = redis_client.dbsize()
+
+        print("Redis Cache Info")
+        print(f"  Version:          {info.get('redis_version', '?')}")
+        print(f"  Connected clients: {info.get('connected_clients', '?')}")
+        print(f"  Used memory:      {info.get('used_memory_human', '?')}")
+        print(f"  Peak memory:      {info.get('used_memory_peak_human', '?')}")
+        print(f"  Total keys:       {dbsize}")
+        print(f"  Uptime (seconds): {info.get('uptime_in_seconds', '?')}")
+        print(f"  Hit rate:         {info.get('keyspace_hits', 0)} hits / {info.get('keyspace_misses', 0)} misses")
+
+        evicted = info.get("evicted_keys", 0)
+        if evicted:
+            print(f"  Evicted keys:     {evicted}")
+
+        logger.info(f"cmd:cache:info — Redis dbsize={dbsize}")
+    except ImportError:
+        print("Redis cache module not available")
+    except Exception as exc:
+        print(f"Redis error: {exc}")
+        logger.error(f"cmd:cache:info error: {exc}")
+
+
+# ===========================================================================
+#  CMD: SECURITY — security overview
+# ===========================================================================
+
+def cmd_security(args: List[str]) -> None:
+    """Security overview: blocked IPs, user-agents, ASNs, ISPs count."""
+    db = get_db()
+    try:
+        from src.domain.models import BlockedIP, BlockedUserAgent, BlockedASN, BlockedISP
+
+        blocked_ips = db.query(BlockedIP).count()
+        blocked_uas = db.query(BlockedUserAgent).count()
+        blocked_asns = db.query(BlockedASN).count()
+        blocked_isps = db.query(BlockedISP).count()
+
+        print("Security Overview")
+        print(f"  Blocked IPs:          {blocked_ips}")
+        print(f"  Blocked User-Agents:  {blocked_uas}")
+        print(f"  Blocked ASNs:         {blocked_asns}")
+        print(f"  Blocked ISPs:         {blocked_isps}")
+        print(f"  Total blocklist:      {blocked_ips + blocked_uas + blocked_asns + blocked_isps}")
+
+        # Check for recent blocks
+        try:
+            recent_cutoff = _utcnow() - timedelta(hours=24)
+            recent_ips = db.query(BlockedIP).filter(BlockedIP.created_at >= recent_cutoff).count()
+            if recent_ips > 0:
+                print(f"\n  New blocks (last 24h): {recent_ips} IPs")
+        except Exception:
+            pass
+
+        logger.info(f"cmd:security — IPs={blocked_ips}, UAs={blocked_uas}, ASNs={blocked_asns}, ISPs={blocked_isps}")
+    finally:
+        db.close()
+
+
+# ===========================================================================
+#  CMD: TMDB — TMDB metadata update
+# ===========================================================================
+
+def cmd_tmdb(args: List[str]) -> None:
+    """
+    TMDB metadata operations.
+        cmd:tmdb update-movies   — update movies without TMDB data
+        cmd:tmdb update-series   — update series without TMDB data
+    """
+    if not args:
+        print("Usage: cmd:tmdb update-movies | cmd:tmdb update-series")
+        return
+
+    db = get_db()
+    try:
+        from src.domain.models import Movie, Series, Setting
+
+        sub = args[0].lower()
+
+        # Check for API key
+        api_key_row = db.query(Setting).filter(Setting.key == "tmdb_api_key").first()
+        if not api_key_row or not api_key_row.value:
+            print("Error: TMDB API key not configured. Set 'tmdb_api_key' in Settings.")
+            return
+
+        if sub == "update-movies":
+            movies = db.query(Movie).filter(
+                (Movie.tmdb_id == None) | (Movie.tmdb_id == 0)
+            ).all()
+            print(f"Movies without TMDB metadata: {len(movies)}")
+            if not movies:
+                print("All movies have TMDB metadata.")
+                return
+
+            updated = 0
+            errors = 0
+            for movie in movies:
+                try:
+                    from src.modules.tmdb.service import TMDBService
+                    svc = TMDBService(db)
+                    # Use synchronous wrapper for CLI
+                    import asyncio
+                    result = asyncio.get_event_loop().run_until_complete(
+                        svc.search_and_update_movie(movie.id)
+                    )
+                    if result:
+                        updated += 1
+                        print(f"  Updated: {movie.stream_display_name} -> tmdb_id={result.get('tmdb_id', '?')}")
+                    else:
+                        print(f"  Not found: {movie.stream_display_name}")
+                except Exception as exc:
+                    errors += 1
+                    print(f"  Error for {movie.stream_display_name}: {exc}")
+
+            print(f"\nDone. Updated: {updated}, Errors: {errors}, Skipped: {len(movies) - updated - errors}")
+            logger.info(f"cmd:tmdb update-movies — updated={updated}, errors={errors}")
+
+        elif sub == "update-series":
+            series_list = db.query(Series).filter(
+                (Series.tmdb_id == None) | (Series.tmdb_id == 0)
+            ).all()
+            print(f"Series without TMDB metadata: {len(series_list)}")
+            if not series_list:
+                print("All series have TMDB metadata.")
+                return
+
+            updated = 0
+            errors = 0
+            for series in series_list:
+                try:
+                    from src.modules.tmdb.service import TMDBService
+                    svc = TMDBService(db)
+                    import asyncio
+                    result = asyncio.get_event_loop().run_until_complete(
+                        svc.search_and_update_series(series.id)
+                    )
+                    if result:
+                        updated += 1
+                        print(f"  Updated: {series.series_name} -> tmdb_id={result.get('tmdb_id', '?')}")
+                    else:
+                        print(f"  Not found: {series.series_name}")
+                except Exception as exc:
+                    errors += 1
+                    print(f"  Error for {series.series_name}: {exc}")
+
+            print(f"\nDone. Updated: {updated}, Errors: {errors}, Skipped: {len(series_list) - updated - errors}")
+            logger.info(f"cmd:tmdb update-series — updated={updated}, errors={errors}")
+
+        else:
+            print(f"Unknown tmdb sub-command: {sub}")
+
+    except Exception as exc:
+        logger.error(f"cmd:tmdb error: {exc}")
+        print(f"Error: {exc}")
+    finally:
+        db.close()
+
+
+# ===========================================================================
+#  CMD: THEFT — theft detection
+# ===========================================================================
+
+def cmd_theft(args: List[str]) -> None:
+    """
+    Theft detection.
+        cmd:theft scan    — run credential sharing scan
+        cmd:theft alerts  — show recent theft alerts
+    """
+    if not args:
+        print("Usage: cmd:theft scan | cmd:theft alerts")
+        return
+
+    sub = args[0].lower()
+
+    if sub == "scan":
+        db = get_db()
+        try:
+            from src.modules.theft_detection.service import TheftDetectionService
+
+            svc = TheftDetectionService()
+            suspects = svc.detect_credential_sharing()
+            db_suspects = svc.detect_credential_sharing_db(db)
+
+            # Merge results
+            seen = {r["user_id"] for r in db_suspects}
+            combined = db_suspects + [r for r in suspects if r["user_id"] not in seen]
+
+            print(f"Theft Detection Scan Results: {len(combined)} suspicious users")
+            if not combined:
+                print("  No credential sharing detected.")
+                return
+
+            headers = ["UserID", "UniqueIPs", "UniqueUAs", "Risk"]
+            rows = []
+            for s in combined:
+                rows.append([
+                    s["user_id"],
+                    s.get("unique_ips", 0),
+                    s.get("unique_user_agents", 0),
+                    s.get("risk_level", "unknown"),
+                ])
+            _print_table(headers, rows)
+            logger.info(f"cmd:theft scan — found {len(combined)} suspicious users")
+        finally:
+            db.close()
+
+    elif sub == "alerts":
+        from src.modules.theft_detection.service import TheftDetectionService
+
+        svc = TheftDetectionService()
+        alerts = svc.get_alerts()
+        print(f"Theft Alerts: {len(alerts)}")
+        if not alerts:
+            print("  No alerts.")
+            return
+
+        headers = ["Type", "UserID", "Detail", "Timestamp"]
+        rows = []
+        for a in alerts:
+            rows.append([
+                a.get("type", ""),
+                a.get("user_id", ""),
+                _trunc(a.get("detail", ""), 40),
+                a.get("timestamp", "")[:19] if a.get("timestamp") else "",
+            ])
+        _print_table(headers, rows)
+        logger.info(f"cmd:theft alerts — listed {len(alerts)} alerts")
+
+    else:
+        print(f"Unknown theft sub-command: {sub}")
+
+
+# ===========================================================================
+#  CMD: FINGERPRINT — fingerprint statistics
+# ===========================================================================
+
+def cmd_fingerprint(args: List[str]) -> None:
+    """Show fingerprint statistics."""
+    try:
+        from src.modules.fingerprint.service import FingerprintService
+
+        svc = FingerprintService()
+        stats = svc.get_stats()
+
+        print("Fingerprint Statistics")
+        for key, val in stats.items():
+            print(f"  {key}: {val}")
+
+        logger.info("cmd:fingerprint — displayed stats")
+    except ImportError:
+        print("Fingerprint module not available")
+    except Exception as exc:
+        print(f"Error: {exc}")
+        logger.error(f"cmd:fingerprint error: {exc}")
+
+
+# ===========================================================================
+#  CMD: WATCH — watch folder scan
+# ===========================================================================
+
+def cmd_watch(args: List[str]) -> None:
+    """
+    Watch folder management.
+        cmd:watch scan          — scan configured watch folders
+        cmd:watch scan /path    — scan a specific path
+    """
+    db = get_db()
+    try:
+        from src.modules.watch.service import WatchFolderService
+
+        svc = WatchFolderService(db)
+
+        if not args:
+            print("Usage: cmd:watch scan [path]")
+            return
+
+        sub = args[0].lower()
+
+        if sub == "scan":
+            path = args[1] if len(args) > 1 else None
+            if path:
+                # Scan specific path
+                import os
+                if not os.path.isdir(path):
+                    print(f"Error: {path} is not a directory")
+                    return
+                files = svc.scan_directory(path)
+            else:
+                # Scan all configured watch directories
+                files = svc.scan_all()
+
+            print(f"Watch scan results: {len(files)} media files found")
+            if files:
+                headers = ["Filename", "Path", "Size", "Ext"]
+                rows = []
+                for f in files[:50]:  # Limit display
+                    size_mb = f.get("size", 0) / (1024 * 1024)
+                    rows.append([
+                        _trunc(f.get("filename", ""), 30),
+                        _trunc(f.get("path", ""), 40),
+                        f"{size_mb:.1f} MB",
+                        f.get("extension", ""),
+                    ])
+                _print_table(headers, rows)
+                if len(files) > 50:
+                    print(f"  ... and {len(files) - 50} more files")
+            logger.info(f"cmd:watch scan — found {len(files)} files")
+        else:
+            print(f"Unknown watch sub-command: {sub}")
+
+    except ImportError:
+        print("Watch module not available")
+    except Exception as exc:
+        print(f"Error: {exc}")
+        logger.error(f"cmd:watch error: {exc}")
+    finally:
+        db.close()
+
+
+# ===========================================================================
+#  CMD: ARCHIVE — archive management
+# ===========================================================================
+
+def cmd_archive(args: List[str]) -> None:
+    """Manage timeshift/catchup archives."""
+    db = get_db()
+    try:
+        from src.domain.models import Stream, Setting
+
+        # Get archive settings
+        archive_path_row = db.query(Setting).filter(Setting.key == "archive_path").first()
+        archive_path = archive_path_row.value if archive_path_row and archive_path_row.value else "/var/streamrev/archive"
+
+        retention_row = db.query(Setting).filter(Setting.key == "archive_retention_days").first()
+        retention_days = int(retention_row.value) if retention_row and retention_row.value else 7
+
+        # Count streams with archive enabled
+        archive_streams = db.query(Stream).filter(
+            Stream.enabled == True,
+            Stream.tv_archive == True,
+        ).count()
+
+        print("Archive Info")
+        print(f"  Archive path:          {archive_path}")
+        print(f"  Retention:             {retention_days} days")
+        print(f"  Streams with archive:  {archive_streams}")
+
+        # Check disk usage if path exists
+        if os.path.isdir(archive_path):
+            total_size = 0
+            file_count = 0
+            for root, dirs, files in os.walk(archive_path):
+                for f in files:
+                    fp = os.path.join(root, f)
                     try:
-                        if os.path.isfile(path) and os.path.getmtime(path) < threshold:
-                            os.remove(path)
-                            removed_tmp += 1
+                        total_size += os.path.getsize(fp)
+                        file_count += 1
                     except OSError:
                         pass
-        logger.info(f"Removed {removed_tmp} temp file(s) older than 24h.")
+            print(f"  Archive files:         {file_count}")
+            print(f"  Archive size:          {total_size / (1024**3):.2f} GB")
 
-        log_cutoff = datetime.utcnow() - timedelta(days=30)
-        log_deleted = (
-            db.query(StreamLog)
-            .filter(StreamLog.date < log_cutoff)
-            .delete(synchronize_session=False)
-        )
-        db.commit()
-        logger.info(f"Deleted {log_deleted} stream log row(s) older than 30 days.")
+            # Count expired files
+            cutoff = _utcnow() - timedelta(days=retention_days)
+            expired = 0
+            for root, dirs, files in os.walk(archive_path):
+                for f in files:
+                    fp = os.path.join(root, f)
+                    try:
+                        mtime = datetime.fromtimestamp(os.path.getmtime(fp))
+                        if mtime < cutoff:
+                            expired += 1
+                    except OSError:
+                        pass
+            if expired:
+                print(f"  Expired files:         {expired} (older than {retention_days} days)")
+        else:
+            print(f"  (Archive path does not exist)")
+
+        logger.info("cmd:archive — displayed archive info")
     finally:
         db.close()
 
 
-def cron_cache():
-    logger.info("Running cache cron...")
-    try:
-        import redis
+# ===========================================================================
+#  CRON: QUEUE — process pending stream queue items
+# ===========================================================================
 
-        r = redis.Redis(
-            host=settings.REDIS_HOST,
-            port=settings.REDIS_PORT,
-            db=settings.REDIS_DB,
-            password=settings.REDIS_PASSWORD or None,
-            decode_responses=True,
-            socket_connect_timeout=5,
-        )
-        r.ping()
-        dbsize = r.dbsize()
-        mem = r.info("memory")
-        used = mem.get("used_memory_human", "?")
-        db = get_db()
-        try:
-            from src.domain.server.settings_service import SettingsService
-
-            SettingsService(db).set("last_redis_dbsize", dbsize, "int")
-            SettingsService(db).set(
-                "last_redis_memory_human", str(used), "string"
-            )
-        finally:
-            db.close()
-        logger.info(
-            f"Cache cron complete. Redis dbsize={dbsize}, memory={used}."
-        )
-    except Exception as e:
-        logger.warning(f"Cache cron: Redis unavailable or error: {e}")
-
-
-def cron_servers():
-    logger.info("Running servers cron...")
+def cron_queue(args: List[str]) -> None:
+    """Process pending items in the stream queue."""
     db = get_db()
     try:
-        from src.domain.server.service import ServerService
-        svc = ServerService(db)
-        stats = svc.get_stats()
-        logger.info(f"Server stats: {stats}")
-    finally:
-        db.close()
+        from src.domain.models import StreamQueue, Stream
 
+        pending = db.query(StreamQueue).filter(
+            StreamQueue.status == "pending"
+        ).order_by(StreamQueue.priority.desc(), StreamQueue.created_at).all()
 
-def cron_backups():
-    import shutil
-    from datetime import datetime
-    logger.info("Running backup cron...")
-    backup_dir = os.path.join(settings.BASE_DIR, "backups")
-    os.makedirs(backup_dir, exist_ok=True)
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    backup_name = f"backup_{timestamp}"
-    logger.info(f"Backup cron complete: {backup_name}")
-
-
-def cmd_migrate():
-    logger.info("Running database migrations...")
-    Base.metadata.create_all(bind=engine)
-    logger.info("Database migration complete")
-
-
-def cmd_create_admin():
-    db = get_db()
-    try:
-        from src.domain.user.service import UserService
-        svc = UserService(db)
-        username = input("Admin username: ").strip() or "admin"
-        password = input("Admin password: ").strip() or "admin"
-        existing = svc.get_by_username(username)
-        if existing:
-            print(f"User '{username}' already exists")
+        if not pending:
+            logger.info("cron:queue — no pending items")
             return
-        svc.create({
-            "username": username, "password": password,
-            "is_admin": True, "enabled": True, "max_connections": 1,
-        })
-        print(f"Admin user '{username}' created successfully")
-    finally:
-        db.close()
 
+        logger.info(f"cron:queue — processing {len(pending)} pending items")
+        processed = 0
+        failed = 0
 
-def cmd_reset_admin():
-    db = get_db()
-    try:
-        from src.domain.user.service import UserService
-        svc = UserService(db)
-        admin = svc.get_by_username("admin")
-        if not admin:
-            print("Admin user not found")
-            return
-        new_pass = input("New password: ").strip() or "admin"
-        svc.update(admin.id, {"password": new_pass})
-        print("Admin password reset successfully")
-    finally:
-        db.close()
-
-
-def cmd_import_epg():
-    url = input("EPG URL (XMLTV format): ").strip()
-    if not url:
-        print("URL required")
-        return
-    import urllib.request
-    logger.info(f"Downloading EPG from {url}...")
-    try:
-        response = urllib.request.urlopen(url)
-        content = response.read().decode("utf-8")
-        db = get_db()
-        try:
-            from src.domain.epg.service import EpgService
-            svc = EpgService(db)
-            count = svc.import_xmltv(content)
-            linked = svc.link_channels()
-            print(f"Imported {count} EPG entries, linked {linked} rows to channels")
-        finally:
-            db.close()
-    except Exception as e:
-        print(f"Failed to import EPG: {e}")
-
-
-def cmd_stats():
-    db = get_db()
-    try:
-        from src.domain.stream.service import StreamService
-        from src.domain.user.service import UserService
-        from src.domain.vod.service import MovieService, SeriesService
-        from src.domain.server.service import ServerService
-
-        print("=" * 50)
-        print("IPTV Panel Statistics")
-        print("=" * 50)
-
-        stats = StreamService(db).get_stats()
-        print(f"\nStreams: {stats['total']} total, {stats['enabled']} enabled, {stats['disabled']} disabled")
-        print(f"  Live: {stats['live']}, Movies: {stats['movies']}, Radio: {stats['radio']}")
-
-        stats = UserService(db).get_stats()
-        print(f"\nUsers: {stats['total']} total, {stats['active']} active, {stats['expired']} expired")
-        print(f"  Online: {stats['online']}, Disabled: {stats['disabled']}, Trial: {stats['trial']}")
-
-        stats = MovieService(db).get_stats()
-        print(f"\nMovies: {stats['total']}")
-
-        stats = SeriesService(db).get_stats()
-        print(f"Series: {stats['total_series']}, Episodes: {stats['total_episodes']}")
-
-        stats = ServerService(db).get_stats()
-        print(f"\nServers: {stats['total']} total, {stats['online']} online, {stats['offline']} offline")
-
-        from src.core.process.manager import ProcessManager
-        sys_info = ProcessManager.get_system_info()
-        print(f"\nSystem: CPU {sys_info['cpu_percent']}%, RAM {sys_info['memory']['percent']}%")
-        print("=" * 50)
-    finally:
-        db.close()
-
-
-def _project_root() -> str:
-    return os.path.abspath(os.path.join(settings.BASE_DIR, ".."))
-
-
-def _uvicorn_pid_path() -> str:
-    os.makedirs(settings.TMP_DIR, exist_ok=True)
-    return os.path.join(settings.TMP_DIR, "panel_uvicorn.pid")
-
-
-def _kill_uvicorn_processes() -> int:
-    import psutil
-
-    killed = 0
-    for proc in psutil.process_iter(["pid", "cmdline"]):
-        try:
-            cmd = proc.info["cmdline"] or []
-            flat = " ".join(cmd)
-            if "uvicorn" in flat and "src.main:app" in flat:
-                proc.send_signal(signal.SIGTERM)
-                killed += 1
-        except (psutil.NoSuchProcess, psutil.AccessDenied):
-            continue
-    return killed
-
-
-def cmd_service_start():
-    import psutil
-
-    pid_path = _uvicorn_pid_path()
-    if os.path.isfile(pid_path):
-        try:
-            with open(pid_path, "r") as f:
-                old_pid = int(f.read().strip())
-            if psutil.pid_exists(old_pid):
-                print(f"Panel already running (PID {old_pid})")
-                return
-        except (ValueError, OSError):
-            pass
-
-    root = _project_root()
-    env = os.environ.copy()
-    env["PYTHONPATH"] = root
-    log_dir = os.path.join(settings.BASE_DIR, "logs")
-    os.makedirs(log_dir, exist_ok=True)
-    log_path = os.path.join(log_dir, "uvicorn.log")
-    out = open(log_path, "ab", buffering=0)
-    cmd = [
-        sys.executable,
-        "-m",
-        "uvicorn",
-        "src.main:app",
-        "--host",
-        settings.SERVER_HOST,
-        "--port",
-        str(settings.SERVER_PORT),
-    ]
-    proc = subprocess.Popen(
-        cmd,
-        cwd=root,
-        env=env,
-        stdout=out,
-        stderr=subprocess.STDOUT,
-        start_new_session=True,
-    )
-    with open(pid_path, "w") as f:
-        f.write(str(proc.pid))
-    print(f"Started panel uvicorn PID {proc.pid} (logs: {log_path})")
-
-
-def cmd_service_stop():
-    import psutil
-
-    pid_path = _uvicorn_pid_path()
-    stopped = 0
-    if os.path.isfile(pid_path):
-        try:
-            with open(pid_path, "r") as f:
-                pid = int(f.read().strip())
-            if psutil.pid_exists(pid):
-                os.kill(pid, signal.SIGTERM)
-                stopped += 1
-                for _ in range(20):
-                    if not psutil.pid_exists(pid):
-                        break
-                    time.sleep(0.5)
-                if psutil.pid_exists(pid):
-                    os.kill(pid, signal.SIGKILL)
-        except (ProcessLookupError, ValueError, OSError):
-            pass
-        try:
-            os.remove(pid_path)
-        except OSError:
-            pass
-    extra = _kill_uvicorn_processes()
-    stopped += extra
-    print(f"Stop complete. Terminated {stopped} uvicorn process(es).")
-
-
-def cmd_service_restart():
-    cmd_service_stop()
-    time.sleep(1)
-    cmd_service_start()
-
-
-def cmd_service_status():
-    import psutil
-
-    import httpx
-
-    pid_path = _uvicorn_pid_path()
-    if os.path.isfile(pid_path):
-        try:
-            with open(pid_path, "r") as f:
-                pid = int(f.read().strip())
-            alive = psutil.pid_exists(pid)
-            print(f"Pid file: {pid_path} -> PID {pid} ({'running' if alive else 'stale'})")
-        except (ValueError, OSError) as e:
-            print(f"Pid file unreadable: {e}")
-    else:
-        print("No pid file (panel may not have been started via cmd:service:start)")
-
-    host = "127.0.0.1" if settings.SERVER_HOST in ("0.0.0.0", "::") else settings.SERVER_HOST
-    url = f"http://{host}:{settings.SERVER_PORT}/health"
-    try:
-        r = httpx.get(url, timeout=3.0)
-        print(f"HTTP health {url}: {r.status_code} {r.text[:200]}")
-    except Exception as e:
-        print(f"HTTP health check failed: {e}")
-
-
-def cmd_scanner():
-    import httpx
-
-    db = get_db()
-    try:
-        from src.domain.stream.provider_service import ProviderService
-
-        providers = ProviderService(db).get_providers()
-        if not providers:
-            print("No provider domains inferred from stream sources.")
-            return
-        for p in providers:
-            domain = p.get("domain") or ""
-            if not domain:
-                continue
-            url = f"https://{domain}/"
+        for item in pending:
             try:
-                r = httpx.head(url, timeout=8.0, follow_redirects=True)
-                logger.info(
-                    f"Scanner: {domain} -> HEAD {r.status_code} "
-                    f"({p.get('stream_count', 0)} streams)"
-                )
-            except Exception as e:
-                logger.warning(f"Scanner: {domain} unreachable: {e}")
-        print(f"Scanned {len(providers)} provider domain(s). See logs for detail.")
+                # Mark as processing
+                item.status = "processing"
+                item.started_at = _utcnow()
+                db.commit()
+
+                stream = db.query(Stream).filter(Stream.id == item.stream_id).first()
+                if not stream:
+                    item.status = "failed"
+                    item.error_message = "Stream not found"
+                    item.completed_at = _utcnow()
+                    db.commit()
+                    failed += 1
+                    continue
+
+                # Attempt to start/process the stream
+                try:
+                    from src.streaming.engine import streaming_engine
+                    streaming_engine.start_stream(stream.id)
+                except ImportError:
+                    pass  # Engine may not be available in CLI context
+
+                # Mark as completed
+                item.status = "completed"
+                item.completed_at = _utcnow()
+                db.commit()
+                processed += 1
+                logger.info(f"cron:queue — processed stream_id={item.stream_id}")
+
+            except Exception as exc:
+                item.status = "failed"
+                item.error_message = str(exc)[:500]
+                item.completed_at = _utcnow()
+                db.commit()
+                failed += 1
+                logger.error(f"cron:queue — failed stream_id={item.stream_id}: {exc}")
+
+        logger.info(f"cron:queue — done: processed={processed}, failed={failed}")
+    except Exception as exc:
+        db.rollback()
+        logger.error(f"cron:queue error: {exc}")
     finally:
         db.close()
 
 
-def cmd_balancer():
+# ===========================================================================
+#  CRON: CONNECTIONS — clean stale connections
+# ===========================================================================
+
+def cron_connections(args: List[str]) -> None:
+    """Clean stale connections and update server total_clients counts."""
     db = get_db()
     try:
+        from src.domain.models import Line, Server
         from sqlalchemy import func
 
-        from src.domain.models import Server, ServerStream
-
-        servers = db.query(Server).order_by(Server.id.asc()).all()
-        if not servers:
-            print("No servers in database.")
-            return
-        for s in servers:
-            n_streams = (
-                db.query(func.count(ServerStream.id))
-                .filter(ServerStream.server_id == s.id)
-                .scalar()
-                or 0
-            )
-            print(
-                f"id={s.id} name={s.server_name!r} status={s.status} "
-                f"clients={s.total_clients} streams_assigned={n_streams} "
-                f"ip={s.server_ip}"
-            )
-    finally:
-        db.close()
-
-
-def cmd_archive():
-    from datetime import datetime, timedelta
-
-    db = get_db()
-    try:
-        from src.domain.models import Stream
-
-        archive_root = os.path.join(settings.CONTENT_DIR, "archive")
-        if not os.path.isdir(archive_root):
-            print("No archive directory on disk.")
-            return
-        removed_dirs = 0
-        for stream in db.query(Stream).filter(Stream.tv_archive.is_(True)).all():
-            days = stream.tv_archive_duration or 7
-            cutoff = datetime.utcnow().date() - timedelta(days=max(days, 1))
-            sdir = os.path.join(archive_root, str(stream.id))
-            if not os.path.isdir(sdir):
-                continue
-            for name in os.listdir(sdir):
-                sub = os.path.join(sdir, name)
-                if not os.path.isdir(sub):
-                    continue
-                try:
-                    day = datetime.strptime(name, "%Y-%m-%d").date()
-                except ValueError:
-                    continue
-                if day < cutoff:
-                    shutil.rmtree(sub, ignore_errors=True)
-                    removed_dirs += 1
-                    logger.info(
-                        f"Archive prune: removed {sub} (stream {stream.id}, "
-                        f"retention {days}d)"
-                    )
-        print(f"Archive maintenance done. Removed {removed_dirs} day-folder(s).")
-    finally:
-        db.close()
-
-
-def cmd_ondemand():
-    argv = sys.argv[2:]
-    if len(argv) < 1:
-        print("Usage: cmd:ondemand start <stream_id> | stop <stream_id> | status")
-        return
-    action = argv[0].lower()
-    db = get_db()
-    try:
-        from src.domain.stream.service import StreamService
-        from src.streaming.engine import streaming_engine
-
-        if action == "status":
-            active = streaming_engine.get_active_streams()
-            print(json.dumps(active, indent=2, default=str))
-            return
-        if len(argv) < 2 or action not in ("start", "stop"):
-            print("Usage: cmd:ondemand start <stream_id> | stop <stream_id> | status")
-            return
-        sid = int(argv[1])
-        stream = StreamService(db).get_by_id(sid)
-        if not stream:
-            print(f"Stream {sid} not found")
-            return
-        sources = StreamService(db).get_sources(sid)
-        if action == "start":
-            if not sources:
-                print("No sources configured for this stream")
-                return
-            pid = streaming_engine.start_stream(
-                sid,
-                sources[0],
-                container=stream.target_container or "ts",
-                custom_ffmpeg=stream.custom_ffmpeg,
-                read_native=stream.read_native,
-            )
-            print(f"On-demand start stream {sid}: pid={pid}")
-        else:
-            ok = streaming_engine.stop_stream(sid)
-            print(f"On-demand stop stream {sid}: ok={ok}")
-    finally:
-        db.close()
-
-
-def cmd_record():
-    db = get_db()
-    try:
-        from src.domain.models import Stream
-
-        rec = (
-            db.query(Stream)
-            .filter(Stream.allow_record.is_(True), Stream.enabled.is_(True))
-            .all()
-        )
-        archive_root = os.path.join(settings.CONTENT_DIR, "archive")
-        print(f"Streams with recording enabled: {len(rec)}")
-        total_bytes = 0
-        for s in rec:
-            ap = os.path.join(archive_root, str(s.id))
-            sz = 0
-            if os.path.isdir(ap):
-                for root, _dirs, files in os.walk(ap):
-                    for fn in files:
-                        fp = os.path.join(root, fn)
-                        try:
-                            sz += os.path.getsize(fp)
-                        except OSError:
-                            pass
-            total_bytes += sz
-            print(f"  stream {s.id} {s.stream_display_name!r} archive_bytes={sz}")
-        print(f"Total archive bytes (record-enabled streams): {total_bytes}")
-    finally:
-        db.close()
-
-
-def cmd_thumbnail():
-    import httpx
-
-    db = get_db()
-    try:
-        from src.domain.models import Stream
-
-        q = (
-            db.query(Stream)
-            .filter(Stream.enabled.is_(True), Stream.stream_type == 1)
-            .all()
-        )
-        updated = 0
-        for s in q:
-            icon = (s.stream_icon or "").strip()
-            if not icon.startswith("http"):
-                continue
-            base = os.path.join(settings.CONTENT_DIR, "streams", str(s.id))
-            os.makedirs(base, exist_ok=True)
-            dest = os.path.join(base, "thumb.jpg")
-            try:
-                r = httpx.get(icon, timeout=20.0, follow_redirects=True)
-                if r.status_code == 200 and r.content:
-                    with open(dest, "wb") as f:
-                        f.write(r.content)
-                    updated += 1
-                    logger.info(f"Thumbnail saved for stream {s.id}")
-            except Exception as e:
-                logger.warning(f"Thumbnail failed stream {s.id}: {e}")
-        print(f"Thumbnail job finished. Updated {updated} stream(s).")
-    finally:
-        db.close()
-
-
-def cmd_certbot():
-    argv = sys.argv[2:]
-    nginx_conf = settings.NGINX_CONF_DIR or os.path.join(
-        settings.BASE_DIR, "..", "bin", "nginx", "conf"
-    )
-    cert_path = os.path.join(nginx_conf, "server.crt")
-    if os.path.isfile(cert_path):
-        try:
-            proc = subprocess.run(
-                ["openssl", "x509", "-in", cert_path, "-noout", "-dates", "-subject"],
-                capture_output=True,
-                text=True,
-                timeout=15,
-            )
-            print(proc.stdout or proc.stderr)
-        except FileNotFoundError:
-            print("openssl not installed; cannot inspect certificate.")
-        except Exception as e:
-            print(f"Certificate inspect error: {e}")
-    else:
-        print(f"No certificate at {cert_path}")
-
-    if "renew" in argv:
-        try:
-            proc = subprocess.run(
-                ["certbot", "renew", "--non-interactive"],
-                capture_output=True,
-                text=True,
-                timeout=600,
-            )
-            print(proc.stdout)
-            if proc.stderr:
-                print(proc.stderr)
-            print(f"certbot renew exit code {proc.returncode}")
-        except FileNotFoundError:
-            print("certbot binary not found (install certbot to renew).")
-
-
-def cmd_signals():
-    argv = sys.argv[2:]
-    sig_dir = os.path.join(settings.BASE_DIR, "signals")
-    os.makedirs(sig_dir, exist_ok=True)
-    if not argv:
-        names = sorted(os.listdir(sig_dir))
-        print("Signal files:", names)
-        return
-    if argv[0] == "clear" and len(argv) > 1:
-        for n in argv[1:]:
-            p = os.path.join(sig_dir, os.path.basename(n))
-            if os.path.isfile(p):
-                os.remove(p)
-                print(f"Removed {p}")
-        return
-    print("Usage: cmd:signals  |  cmd:signals clear <name> [<name>...]")
-
-
-def cmd_tools():
-    argv = sys.argv[2:]
-    if not argv:
-        print("Usage: cmd:tools rescue | ports | access-codes")
-        return
-    sub = argv[0].lower()
-    if sub == "rescue":
-        from sqlalchemy import text
-
-        db = get_db()
-        try:
-            db.execute(text("SELECT 1"))
+        # Remove connections older than the stale threshold (default: 5 minutes)
+        stale_cutoff = _utcnow() - timedelta(minutes=5)
+        stale = db.query(Line).filter(Line.date < stale_cutoff).all()
+        stale_count = len(stale)
+        if stale_count > 0:
+            for line in stale:
+                db.delete(line)
             db.commit()
-            print("Database: OK (SELECT 1)")
-        except Exception as e:
-            print(f"Database: FAILED {e}")
-        finally:
-            db.close()
-        return
-    if sub == "ports":
-        import psutil
+            logger.info(f"cron:connections — removed {stale_count} stale connections")
 
-        listeners = []
-        for c in psutil.net_connections(kind="inet"):
-            if c.status == psutil.CONN_LISTEN and c.laddr:
-                listeners.append(f"{c.laddr.ip}:{c.laddr.port} pid={c.pid}")
-        listeners.sort()
-        print("LISTEN sockets (sample):")
-        for line in listeners[:80]:
-            print(" ", line)
-        if len(listeners) > 80:
-            print(f"  ... ({len(listeners)} total)")
-        return
-    if sub in ("access-codes", "access"):
-        db = get_db()
-        try:
-            from src.domain.server.settings_service import SettingsService
-
-            keys = (
-                "rescue_code",
-                "server_api_key",
-                "mag_access_code",
-            )
-            svc = SettingsService(db)
-            for k in keys:
-                v = svc.get(k, default="")
-                show = "(empty)" if not v else ("*" * min(len(str(v)), 12))
-                print(f"  {k}: {show}")
-        finally:
-            db.close()
-        return
-    print("Unknown subcommand. Use rescue | ports | access-codes")
-
-
-def cron_activity():
-    from datetime import datetime, timedelta
-
-    from src.domain.models import UserActivity
-
-    logger.info("Running activity cron...")
-    db = get_db()
-    try:
-        cutoff = datetime.utcnow() - timedelta(days=90)
-        n = (
-            db.query(UserActivity)
-            .filter(UserActivity.date_start < cutoff)
-            .delete(synchronize_session=False)
-        )
+        # Update server total_clients counts
+        servers = db.query(Server).all()
+        for server in servers:
+            client_count = db.query(func.count(Line.id)).filter(
+                Line.server_id == server.id
+            ).scalar() or 0
+            if server.total_clients != client_count:
+                server.total_clients = client_count
         db.commit()
-        logger.info(f"Activity cron: deleted {n} old user_activity row(s).")
+
+        total_active = db.query(Line).count()
+        logger.info(f"cron:connections — active={total_active}, cleaned={stale_count}, servers updated={len(servers)}")
+    except Exception as exc:
+        db.rollback()
+        logger.error(f"cron:connections error: {exc}")
     finally:
         db.close()
 
 
-def cron_stats():
-    from datetime import datetime, timezone
+# ===========================================================================
+#  CRON: RECORDINGS — manage scheduled recordings
+# ===========================================================================
 
-    logger.info("Running stats cron...")
+def cron_recordings(args: List[str]) -> None:
+    """Check scheduled recordings, start/stop recording processes."""
     db = get_db()
     try:
-        from src.core.process.manager import ProcessManager
-        from src.domain.server.settings_service import SettingsService
+        from src.domain.models import Recording, Stream
 
-        payload = dict(ProcessManager.get_system_info())
-        payload["captured_at"] = datetime.now(timezone.utc).isoformat()
-        SettingsService(db).set("cron_last_stats", payload, "json")
-        logger.info("Stats cron: wrote cron_last_stats setting.")
-    finally:
-        db.close()
+        now = _utcnow()
 
+        # Find recordings that should start now
+        to_start = db.query(Recording).filter(
+            Recording.status == "scheduled",
+            Recording.start_time <= now,
+            Recording.end_time > now,
+        ).all()
 
-def cron_vod():
-    logger.info("Running VOD maintenance cron...")
-    db = get_db()
-    try:
-        from sqlalchemy import or_
+        started = 0
+        for rec in to_start:
+            try:
+                stream = db.query(Stream).filter(Stream.id == rec.stream_id).first()
+                if not stream:
+                    rec.status = "failed"
+                    rec.error_message = "Stream not found"
+                    db.commit()
+                    continue
 
-        from src.domain.models import Movie, SeriesEpisode
+                # Start recording process
+                rec.status = "recording"
+                rec.actual_start = now
+                db.commit()
 
-        empty_movies = (
-            db.query(Movie)
-            .filter(or_(Movie.stream_source.is_(None), Movie.stream_source == ""))
-            .count()
-        )
-        empty_eps = (
-            db.query(SeriesEpisode)
-            .filter(
-                or_(
-                    SeriesEpisode.stream_source.is_(None),
-                    SeriesEpisode.stream_source == "",
+                # Launch FFmpeg recording process
+                from src.core.config import settings
+                output_dir = getattr(settings, "RECORDING_PATH", "/var/streamrev/recordings")
+                os.makedirs(output_dir, exist_ok=True)
+                output_file = os.path.join(
+                    output_dir,
+                    f"rec_{rec.id}_{stream.id}_{now.strftime('%Y%m%d_%H%M%S')}.ts"
                 )
-            )
-            .count()
-        )
-        vod_cache = os.path.join(settings.CONTENT_DIR, "vod")
-        removed = 0
-        if os.path.isdir(vod_cache):
-            for name in os.listdir(vod_cache):
-                p = os.path.join(vod_cache, name)
-                if os.path.isfile(p) and time.time() - os.path.getmtime(p) > 86400 * 30:
+
+                duration_secs = int((rec.end_time - now).total_seconds())
+                if duration_secs > 0 and hasattr(stream, "stream_source") and stream.stream_source:
+                    cmd = [
+                        "ffmpeg", "-y",
+                        "-i", stream.stream_source,
+                        "-t", str(duration_secs),
+                        "-c", "copy",
+                        output_file,
+                    ]
+                    proc = subprocess.Popen(
+                        cmd,
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                    )
+                    rec.pid = proc.pid
+                    rec.output_path = output_file
+                    db.commit()
+                    started += 1
+                    logger.info(f"cron:recordings — started recording id={rec.id} stream={stream.id} pid={proc.pid}")
+
+            except Exception as exc:
+                rec.status = "failed"
+                rec.error_message = str(exc)[:500]
+                db.commit()
+                logger.error(f"cron:recordings — failed to start recording id={rec.id}: {exc}")
+
+        # Find recordings that should have ended
+        to_stop = db.query(Recording).filter(
+            Recording.status == "recording",
+            Recording.end_time <= now,
+        ).all()
+
+        stopped = 0
+        for rec in to_stop:
+            try:
+                if rec.pid:
                     try:
-                        os.remove(p)
-                        removed += 1
+                        os.kill(rec.pid, 15)  # SIGTERM
                     except OSError:
-                        pass
-        logger.info(
-            f"VOD cron: empty movie rows={empty_movies}, empty episode rows={empty_eps}, "
-            f"removed {removed} stale cache file(s)."
-        )
+                        pass  # Process may have already exited
+                rec.status = "completed"
+                rec.actual_end = now
+                db.commit()
+                stopped += 1
+                logger.info(f"cron:recordings — stopped recording id={rec.id}")
+            except Exception as exc:
+                logger.error(f"cron:recordings — error stopping recording id={rec.id}: {exc}")
+
+        if started or stopped:
+            logger.info(f"cron:recordings — started={started}, stopped={stopped}")
+        else:
+            logger.info("cron:recordings — no recordings to process")
+
+    except ImportError:
+        logger.warning("cron:recordings — Recording model not available")
+    except Exception as exc:
+        db.rollback()
+        logger.error(f"cron:recordings error: {exc}")
     finally:
         db.close()
 
 
-def cron_series():
-    from datetime import datetime
+# ===========================================================================
+#  CRON: AUDIT — clean old audit logs
+# ===========================================================================
 
-    from sqlalchemy import func
-
-    logger.info("Running series metadata cron...")
+def cron_audit(args: List[str]) -> None:
+    """Clean audit log entries older than 90 days."""
     db = get_db()
     try:
-        from src.domain.models import Series, SeriesEpisode
+        from src.domain.models import AuditLog
 
-        touched = 0
-        for series in db.query(Series).all():
-            cnt = (
-                db.query(func.count(SeriesEpisode.id))
-                .filter(SeriesEpisode.series_id == series.id)
-                .scalar()
-                or 0
-            )
-            if cnt == 0:
-                continue
-            series.last_modified = datetime.utcnow()
-            touched += 1
-        db.commit()
-        logger.info(f"Series cron: refreshed last_modified on {touched} series.")
-    finally:
-        db.close()
-
-
-def cron_errors():
-    logger.info("Running error / log rotation cron...")
-    log_dir = os.path.join(settings.BASE_DIR, "logs")
-    if not os.path.isdir(log_dir):
-        logger.info("No logs directory.")
-        return
-    max_bytes = 50 * 1024 * 1024
-    rotated = 0
-    for path in glob.glob(os.path.join(log_dir, "*.log")):
-        try:
-            if os.path.getsize(path) <= max_bytes:
-                continue
-            backup = path + ".1"
-            shutil.move(path, backup)
-            with open(path, "w") as fresh:
-                fresh.write(f"# truncated at {time.time()}\n")
-            rotated += 1
-            logger.info(f"Rotated oversized log {os.path.basename(path)}")
-        except OSError as e:
-            logger.warning(f"Log rotate failed for {path}: {e}")
-    logger.info(f"Errors cron: rotated {rotated} file(s).")
-
-
-def cron_lines_logs():
-    from datetime import datetime, timedelta
-
-    from src.domain.models import Line
-
-    logger.info("Running lines log cleanup cron...")
-    db = get_db()
-    try:
-        cutoff = datetime.utcnow() - timedelta(hours=48)
-        n = (
-            db.query(Line)
-            .filter(Line.date < cutoff)
-            .delete(synchronize_session=False)
+        cutoff = _utcnow() - timedelta(days=90)
+        deleted = db.query(AuditLog).filter(AuditLog.created_at < cutoff).delete(
+            synchronize_session="fetch"
         )
         db.commit()
-        logger.info(f"Lines logs cron: removed {n} line row(s) older than 48h.")
+        logger.info(f"cron:audit — cleaned {deleted} audit log entries older than 90 days")
+    except Exception as exc:
+        db.rollback()
+        logger.error(f"cron:audit error: {exc}")
     finally:
         db.close()
 
 
-def cron_streams_logs():
-    from datetime import datetime, timedelta
+# ===========================================================================
+#  CRON: THEFT — run theft detection scan
+# ===========================================================================
 
-    from src.domain.models import StreamLog
-
-    logger.info("Running stream logs cleanup cron...")
+def cron_theft(args: List[str]) -> None:
+    """Run theft detection scan and log alerts."""
     db = get_db()
     try:
-        cutoff = datetime.utcnow() - timedelta(days=14)
-        n = (
-            db.query(StreamLog)
-            .filter(StreamLog.date < cutoff)
-            .delete(synchronize_session=False)
-        )
-        db.commit()
-        logger.info(f"Streams logs cron: removed {n} stream_logs row(s) older than 14d.")
-    finally:
-        db.close()
+        from src.modules.theft_detection.service import TheftDetectionService
 
+        svc = TheftDetectionService()
 
-def cron_providers():
-    import httpx
+        # In-memory detection
+        suspects_mem = svc.detect_credential_sharing()
 
-    logger.info("Running provider health cron...")
-    db = get_db()
-    try:
-        from src.domain.stream.provider_service import ProviderService
+        # Database detection
+        suspects_db = svc.detect_credential_sharing_db(db)
 
-        providers = ProviderService(db).get_providers()
-        ok = 0
-        fail = 0
-        for p in providers:
-            domain = (p.get("domain") or "").strip()
-            if not domain:
-                continue
-            try:
-                r = httpx.head(
-                    f"https://{domain}/",
-                    timeout=6.0,
-                    follow_redirects=True,
+        # Merge
+        seen = {r["user_id"] for r in suspects_db}
+        combined = suspects_db + [r for r in suspects_mem if r["user_id"] not in seen]
+
+        if combined:
+            for suspect in combined:
+                svc.create_alert(
+                    alert_type="credential_sharing",
+                    user_id=suspect["user_id"],
+                    detail=f"Unique IPs: {suspect.get('unique_ips', 0)}, Risk: {suspect.get('risk_level', 'unknown')}",
                 )
-                if r.status_code < 500:
-                    ok += 1
-                else:
-                    fail += 1
-            except Exception:
-                fail += 1
-        from src.domain.server.settings_service import SettingsService
+            logger.warning(f"cron:theft — {len(combined)} suspicious users detected")
+        else:
+            logger.info("cron:theft — no suspicious activity detected")
 
-        SettingsService(db).set("cron_providers_ok", ok, "int")
-        SettingsService(db).set("cron_providers_fail", fail, "int")
-        logger.info(
-            f"Providers cron: {len(providers)} domain(s), ok={ok}, fail={fail}."
-        )
+    except ImportError:
+        logger.warning("cron:theft — theft_detection module not available")
+    except Exception as exc:
+        logger.error(f"cron:theft error: {exc}")
     finally:
         db.close()
 
 
-def cron_certbot():
-    logger.info("Running certificate check cron...")
-    nginx_conf = settings.NGINX_CONF_DIR or os.path.join(
-        settings.BASE_DIR, "..", "bin", "nginx", "conf"
-    )
-    cert_path = os.path.join(nginx_conf, "server.crt")
-    detail = "missing"
-    if os.path.isfile(cert_path):
-        try:
-            proc = subprocess.run(
-                ["openssl", "x509", "-in", cert_path, "-noout", "-enddate"],
-                capture_output=True,
-                text=True,
-                timeout=15,
-            )
-            detail = (proc.stdout or proc.stderr or "").strip()
-        except Exception as e:
-            detail = str(e)
+# ===========================================================================
+#  CRON: TMDB — auto-update metadata
+# ===========================================================================
+
+def cron_tmdb(args: List[str]) -> None:
+    """Auto-update movies and series without TMDB metadata."""
     db = get_db()
     try:
-        from src.domain.server.settings_service import SettingsService
+        from src.domain.models import Movie, Series, Setting
 
-        SettingsService(db).set("cron_cert_enddate", detail[:512], "string")
+        api_key_row = db.query(Setting).filter(Setting.key == "tmdb_api_key").first()
+        if not api_key_row or not api_key_row.value:
+            logger.info("cron:tmdb — no API key configured, skipping")
+            return
+
+        # Update movies (batch of 20)
+        movies = db.query(Movie).filter(
+            (Movie.tmdb_id == None) | (Movie.tmdb_id == 0)
+        ).limit(20).all()
+
+        movie_updated = 0
+        for movie in movies:
+            try:
+                from src.modules.tmdb.service import TMDBService
+                svc = TMDBService(db)
+                import asyncio
+                loop = asyncio.new_event_loop()
+                result = loop.run_until_complete(svc.search_and_update_movie(movie.id))
+                loop.close()
+                if result:
+                    movie_updated += 1
+            except Exception as exc:
+                logger.error(f"cron:tmdb — movie {movie.id} error: {exc}")
+
+        # Update series (batch of 20)
+        series_list = db.query(Series).filter(
+            (Series.tmdb_id == None) | (Series.tmdb_id == 0)
+        ).limit(20).all()
+
+        series_updated = 0
+        for series in series_list:
+            try:
+                from src.modules.tmdb.service import TMDBService
+                svc = TMDBService(db)
+                import asyncio
+                loop = asyncio.new_event_loop()
+                result = loop.run_until_complete(svc.search_and_update_series(series.id))
+                loop.close()
+                if result:
+                    series_updated += 1
+            except Exception as exc:
+                logger.error(f"cron:tmdb — series {series.id} error: {exc}")
+
+        logger.info(f"cron:tmdb — movies updated={movie_updated}/{len(movies)}, series updated={series_updated}/{len(series_list)}")
+
+    except ImportError:
+        logger.warning("cron:tmdb — TMDB module not available")
+    except Exception as exc:
+        logger.error(f"cron:tmdb error: {exc}")
     finally:
         db.close()
-    logger.info(f"Cert cron: {detail[:120]}")
 
 
-def cron_tmp():
-    logger.info("Running temp cleanup cron...")
-    tmp_dir = settings.TMP_DIR
-    if not os.path.isdir(tmp_dir):
-        logger.info("No tmp dir.")
-        return
-    threshold = time.time() - 3600
-    removed = 0
-    for root, dirs, files in os.walk(tmp_dir):
-        for name in files:
-            path = os.path.join(root, name)
+# ===========================================================================
+#  CRON: FINGERPRINT — analyze fingerprints for sharing detection
+# ===========================================================================
+
+def cron_fingerprint(args: List[str]) -> None:
+    """Analyze connection fingerprints for sharing detection."""
+    db = get_db()
+    try:
+        from src.modules.fingerprint.service import FingerprintService
+        from src.domain.models import Line, User
+
+        svc = FingerprintService()
+
+        # Record fingerprints for all active connections
+        lines = db.query(Line).all()
+        recorded = 0
+        for line in lines:
             try:
-                if os.path.isfile(path) and os.path.getmtime(path) < threshold:
-                    os.remove(path)
-                    removed += 1
-            except OSError:
+                fp = svc.record_fingerprint(
+                    user_id=line.user_id,
+                    ip=getattr(line, "user_ip", ""),
+                    user_agent=getattr(line, "user_agent", ""),
+                    stream_id=line.stream_id,
+                )
+                recorded += 1
+            except Exception:
                 pass
-    logger.info(f"Tmp cron: removed {removed} file(s) older than 1h.")
+
+        # Check for suspicious patterns
+        suspicious = svc.get_suspicious_patterns()
+        if suspicious:
+            logger.warning(f"cron:fingerprint — {len(suspicious)} suspicious patterns detected")
+        else:
+            logger.info(f"cron:fingerprint — recorded {recorded} fingerprints, no suspicious patterns")
+
+    except ImportError:
+        logger.warning("cron:fingerprint — fingerprint module not available")
+    except Exception as exc:
+        logger.error(f"cron:fingerprint error: {exc}")
+    finally:
+        db.close()
 
 
-COMMANDS = {
-    "startup": cmd_startup,
-    "monitor": cmd_monitor,
-    "watchdog": cmd_watchdog,
-    "cron:streams": cron_streams,
-    "cron:users": cron_users,
-    "cron:epg": cron_epg,
-    "cron:cleanup": cron_cleanup,
-    "cron:cache": cron_cache,
-    "cron:servers": cron_servers,
-    "cron:backups": cron_backups,
-    "cron:activity": cron_activity,
-    "cron:stats": cron_stats,
-    "cron:vod": cron_vod,
-    "cron:series": cron_series,
-    "cron:errors": cron_errors,
-    "cron:lines-logs": cron_lines_logs,
-    "cron:streams-logs": cron_streams_logs,
-    "cron:providers": cron_providers,
-    "cron:certbot": cron_certbot,
-    "cron:tmp": cron_tmp,
-    "cmd:migrate": cmd_migrate,
-    "cmd:create-admin": cmd_create_admin,
-    "cmd:reset-admin": cmd_reset_admin,
-    "cmd:import-epg": cmd_import_epg,
-    "cmd:stats": cmd_stats,
-    "cmd:service:start": cmd_service_start,
-    "cmd:service:stop": cmd_service_stop,
-    "cmd:service:restart": cmd_service_restart,
-    "cmd:service:status": cmd_service_status,
-    "cmd:scanner": cmd_scanner,
-    "cmd:balancer": cmd_balancer,
+# ===========================================================================
+#  CRON: WATCH — scan watch folders and auto-import
+# ===========================================================================
+
+def cron_watch(args: List[str]) -> None:
+    """Scan watch folders and auto-import new files."""
+    db = get_db()
+    try:
+        from src.modules.watch.service import WatchFolderService
+
+        svc = WatchFolderService(db)
+        dirs = svc.get_watch_dirs()
+        if not dirs:
+            logger.info("cron:watch — no watch directories configured")
+            return
+
+        total_found = 0
+        total_imported = 0
+        for watch_dir in dirs:
+            if not os.path.isdir(watch_dir):
+                logger.warning(f"cron:watch — directory not found: {watch_dir}")
+                continue
+
+            files = svc.scan_directory(watch_dir)
+            total_found += len(files)
+
+            # Auto-import new files
+            for f in files:
+                try:
+                    imported = svc.auto_import_file(f["path"])
+                    if imported:
+                        total_imported += 1
+                except Exception as exc:
+                    logger.error(f"cron:watch — import error for {f['path']}: {exc}")
+
+        logger.info(f"cron:watch — scanned {len(dirs)} dirs, found {total_found} files, imported {total_imported}")
+
+    except ImportError:
+        logger.warning("cron:watch — watch module not available")
+    except Exception as exc:
+        logger.error(f"cron:watch error: {exc}")
+    finally:
+        db.close()
+
+
+# ===========================================================================
+#  CRON: ARCHIVE — archive maintenance
+# ===========================================================================
+
+def cron_archive(args: List[str]) -> None:
+    """Archive maintenance: clean expired archive files."""
+    db = get_db()
+    try:
+        from src.domain.models import Setting
+
+        archive_path_row = db.query(Setting).filter(Setting.key == "archive_path").first()
+        archive_path = archive_path_row.value if archive_path_row and archive_path_row.value else "/var/streamrev/archive"
+
+        retention_row = db.query(Setting).filter(Setting.key == "archive_retention_days").first()
+        retention_days = int(retention_row.value) if retention_row and retention_row.value else 7
+
+        if not os.path.isdir(archive_path):
+            logger.info(f"cron:archive — archive path does not exist: {archive_path}")
+            return
+
+        cutoff = _utcnow() - timedelta(days=retention_days)
+        removed = 0
+        freed_bytes = 0
+
+        for root, dirs, files in os.walk(archive_path):
+            for f in files:
+                fp = os.path.join(root, f)
+                try:
+                    mtime = datetime.fromtimestamp(os.path.getmtime(fp))
+                    if mtime < cutoff:
+                        size = os.path.getsize(fp)
+                        os.remove(fp)
+                        removed += 1
+                        freed_bytes += size
+                except OSError as exc:
+                    logger.error(f"cron:archive — error removing {fp}: {exc}")
+
+        # Clean empty directories
+        for root, dirs, files in os.walk(archive_path, topdown=False):
+            for d in dirs:
+                dp = os.path.join(root, d)
+                try:
+                    if not os.listdir(dp):
+                        os.rmdir(dp)
+                except OSError:
+                    pass
+
+        freed_mb = freed_bytes / (1024 * 1024)
+        logger.info(f"cron:archive — removed {removed} expired files, freed {freed_mb:.1f} MB (retention={retention_days}d)")
+
+    except Exception as exc:
+        logger.error(f"cron:archive error: {exc}")
+    finally:
+        db.close()
+
+
+# ===========================================================================
+#  CRON: REGISTRATIONS — clean old pending registrations
+# ===========================================================================
+
+def cron_registrations(args: List[str]) -> None:
+    """Clean old pending registrations older than 30 days."""
+    db = get_db()
+    try:
+        from src.domain.models import Registration
+
+        cutoff = _utcnow() - timedelta(days=30)
+        deleted = db.query(Registration).filter(
+            Registration.status == "pending",
+            Registration.created_at < cutoff,
+        ).delete(synchronize_session="fetch")
+        db.commit()
+
+        if deleted > 0:
+            logger.info(f"cron:registrations — cleaned {deleted} pending registrations older than 30 days")
+        else:
+            logger.info("cron:registrations — no expired registrations")
+
+    except Exception as exc:
+        db.rollback()
+        logger.error(f"cron:registrations error: {exc}")
+    finally:
+        db.close()
+
+
+# ===========================================================================
+#  COMMANDS REGISTRY
+# ===========================================================================
+
+COMMANDS: Dict[str, Any] = {
+    # --- Admin CLI commands ---
+    "cmd:connections": cmd_connections,
+    "cmd:kill": cmd_kill,
+    "cmd:queue": cmd_queue,
+    "cmd:audit": cmd_audit,
+    "cmd:profiles": cmd_profiles,
+    "cmd:rtmp": cmd_rtmp,
+    "cmd:sessions": cmd_sessions,
+    "cmd:hmac": cmd_hmac,
+    "cmd:proxies": cmd_proxies,
+    "cmd:db": cmd_db,
+    "cmd:cache:info": cmd_cache_info,
+    "cmd:security": cmd_security,
+    "cmd:tmdb": cmd_tmdb,
+    "cmd:theft": cmd_theft,
+    "cmd:fingerprint": cmd_fingerprint,
+    "cmd:watch": cmd_watch,
     "cmd:archive": cmd_archive,
-    "cmd:ondemand": cmd_ondemand,
-    "cmd:record": cmd_record,
-    "cmd:thumbnail": cmd_thumbnail,
-    "cmd:certbot": cmd_certbot,
-    "cmd:signals": cmd_signals,
-    "cmd:tools": cmd_tools,
+    # --- Cron jobs ---
+    "cron:queue": cron_queue,
+    "cron:connections": cron_connections,
+    "cron:recordings": cron_recordings,
+    "cron:audit": cron_audit,
+    "cron:theft": cron_theft,
+    "cron:tmdb": cron_tmdb,
+    "cron:fingerprint": cron_fingerprint,
+    "cron:watch": cron_watch,
+    "cron:archive": cron_archive,
+    "cron:registrations": cron_registrations,
 }
 
 
-def main():
+# ===========================================================================
+#  MAIN ENTRY POINT
+# ===========================================================================
+
+def _print_help() -> None:
+    """Print available commands."""
+    print("StreamRev CLI Console")
+    print("=" * 50)
+    print()
+    print("Usage: python -m src.cli.console <command> [args...]")
+    print()
+
+    cmds = sorted(k for k in COMMANDS if k.startswith("cmd:"))
+    crons = sorted(k for k in COMMANDS if k.startswith("cron:"))
+
+    print("Admin Commands:")
+    for c in cmds:
+        doc = COMMANDS[c].__doc__
+        desc = doc.strip().split("\n")[0] if doc else ""
+        print(f"  {c:<22} {desc}")
+
+    print()
+    print("Cron Jobs:")
+    for c in crons:
+        doc = COMMANDS[c].__doc__
+        desc = doc.strip().split("\n")[0] if doc else ""
+        print(f"  {c:<22} {desc}")
+
+    print()
+
+
+def main() -> None:
+    """CLI entry point."""
     if len(sys.argv) < 2:
-        print("IPTV Panel CLI")
-        print(f"Usage: python -m src.cli.console <command>")
-        print(f"\nAvailable commands:")
-        for cmd in sorted(COMMANDS.keys()):
-            print(f"  {cmd}")
-        sys.exit(1)
+        _print_help()
+        sys.exit(0)
 
     command = sys.argv[1]
-    if command not in COMMANDS:
+    args = sys.argv[2:]
+
+    if command in ("--help", "-h", "help"):
+        _print_help()
+        sys.exit(0)
+
+    handler = COMMANDS.get(command)
+    if handler is None:
         print(f"Unknown command: {command}")
-        print(f"Available: {', '.join(sorted(COMMANDS.keys()))}")
+        print(f"Run with --help to see available commands.")
         sys.exit(1)
 
-    COMMANDS[command]()
+    try:
+        handler(args)
+    except KeyboardInterrupt:
+        print("\nInterrupted.")
+        sys.exit(130)
+    except Exception as exc:
+        logger.error(f"Command '{command}' failed: {exc}")
+        print(f"Error: {exc}")
+        sys.exit(1)
 
 
 if __name__ == "__main__":

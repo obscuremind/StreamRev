@@ -993,3 +993,82 @@ class Migration(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     migration: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
     applied_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=_utcnow)
+
+
+class StreamQueue(Base):
+    """Stream processing queue entries."""
+
+    __tablename__ = "stream_queue"
+    __table_args__ = (
+        Index("ix_stream_queue_status", "status"),
+        Index("ix_stream_queue_stream_id", "stream_id"),
+        Index("ix_stream_queue_server_id", "server_id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    stream_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("streams.id", ondelete="CASCADE"), nullable=False
+    )
+    server_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("servers.id", ondelete="CASCADE"), nullable=False
+    )
+    status: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="pending"
+    )  # pending / processing / completed / failed
+    priority: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=_utcnow)
+    started_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+    stream: Mapped["Stream"] = relationship("Stream", foreign_keys=[stream_id])
+    server: Mapped["Server"] = relationship("Server", foreign_keys=[server_id])
+
+
+class AuditLog(Base):
+    """Admin action audit log."""
+
+    __tablename__ = "audit_logs"
+    __table_args__ = (
+        Index("ix_audit_logs_admin_id", "admin_id"),
+        Index("ix_audit_logs_action", "action"),
+        Index("ix_audit_logs_entity", "entity_type", "entity_id"),
+        Index("ix_audit_logs_created_at", "created_at"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    admin_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    admin_username: Mapped[str] = mapped_column(String(255), nullable=False, default="")
+    action: Mapped[str] = mapped_column(String(128), nullable=False, default="")
+    entity_type: Mapped[str] = mapped_column(String(64), nullable=False, default="")
+    entity_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    details: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    ip_address: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=_utcnow)
+
+
+class ScheduledRecording(Base):
+    """Scheduled stream recordings."""
+
+    __tablename__ = "scheduled_recordings"
+    __table_args__ = (
+        Index("ix_scheduled_recordings_stream_id", "stream_id"),
+        Index("ix_scheduled_recordings_status", "status"),
+        Index("ix_scheduled_recordings_start_time", "start_time"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    stream_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("streams.id", ondelete="CASCADE"), nullable=False
+    )
+    start_time: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    end_time: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    title: Mapped[str] = mapped_column(String(512), nullable=False, default="")
+    status: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="scheduled"
+    )  # scheduled / recording / completed / failed / archived
+    output_path: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    file_size: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=_utcnow)
+
+    stream: Mapped["Stream"] = relationship("Stream", foreign_keys=[stream_id])
