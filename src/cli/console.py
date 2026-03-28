@@ -1519,6 +1519,222 @@ def cron_registrations(args: List[str]) -> None:
 
 
 # ===========================================================================
+#  XC_VM-STYLE CRONS — explicit compatibility implementations
+# ===========================================================================
+
+def cron_streams(args: List[str]) -> None:
+    """Streams maintenance: process queue + prune stale connections."""
+    cron_queue(args)
+    cron_connections(args)
+    logger.info("cron:streams — queue + connection maintenance completed")
+
+
+def cron_users(args: List[str]) -> None:
+    """Expire/disable users whose expiration date has passed."""
+    db = get_db()
+    try:
+        from src.domain.models import User
+
+        now = _utcnow()
+        updated = (
+            db.query(User)
+            .filter(User.enabled.is_(True), User.exp_date.isnot(None), User.exp_date <= now)
+            .update({User.enabled: False}, synchronize_session="fetch")
+        )
+        db.commit()
+        logger.info(f"cron:users — disabled {updated} expired user(s)")
+    except Exception as exc:
+        db.rollback()
+        logger.error(f"cron:users error: {exc}")
+    finally:
+        db.close()
+
+
+def cron_epg(args: List[str]) -> None:
+    """EPG cleanup and relink pass."""
+    db = get_db()
+    try:
+        from src.domain.epg.service import EpgService
+
+        svc = EpgService(db)
+        removed = svc.clear_old(days=7)
+        linked = svc.link_channels(db)
+        logger.info(f"cron:epg — removed {removed} old programmes; linked {linked} rows")
+    except Exception as exc:
+        logger.error(f"cron:epg error: {exc}")
+    finally:
+        db.close()
+
+
+def cron_cache(args: List[str]) -> None:
+    """Cache maintenance."""
+    # RedisCache in this codebase is async; cron console is sync.
+    # Keep this command as a safe compatibility no-op until async cron runner is introduced.
+    logger.info("cron:cache — compatibility no-op (async Redis maintenance not available in sync CLI yet)")
+
+
+def cron_servers(args: List[str]) -> None:
+    """Server health check summary."""
+    db = get_db()
+    try:
+        from src.domain.server.service import ServerService
+
+        svc = ServerService(db)
+        rows = svc.get_all()
+        total = len(rows)
+        online = sum(1 for s in rows if getattr(s, "status", 0) == 1)
+        logger.info(f"cron:servers — online={online}/{total}")
+    except Exception as exc:
+        logger.error(f"cron:servers error: {exc}")
+    finally:
+        db.close()
+
+
+def cron_backups(args: List[str]) -> None:
+    """Backup maintenance: remove stale backup files older than 14 days."""
+    db = get_db()
+    try:
+        from src.core.config import settings
+
+        keep_days = 14
+        cutoff = _utcnow() - timedelta(days=keep_days)
+        removed = 0
+        for root, _dirs, files in os.walk(settings.BACKUP_DIR):
+            for name in files:
+                fp = os.path.join(root, name)
+                try:
+                    mtime = datetime.fromtimestamp(os.path.getmtime(fp))
+                    if mtime < cutoff:
+                        os.remove(fp)
+                        removed += 1
+                except OSError:
+                    continue
+        logger.info(f"cron:backups — removed {removed} stale file(s) older than {keep_days} days")
+    finally:
+        db.close()
+
+
+# ===========================================================================
+#  COMPAT COMMANDS — installer/readme compatibility
+# ===========================================================================
+
+def cmd_migrate(args: List[str]) -> None:
+    """Run database migrations (create missing tables from metadata)."""
+    from src.core.database import Base, engine
+    from src.domain import models as _models  # noqa: F401
+
+    Base.metadata.create_all(bind=engine)
+    print("Database migration completed (metadata create_all).")
+
+
+def cmd_create_admin(args: List[str]) -> None:
+    """Create or update default admin user."""
+    db = get_db()
+    try:
+        from src.domain.user.service import UserService
+
+        svc = UserService(db)
+        username = args[0] if args else "admin"
+        password = args[1] if len(args) > 1 else "admin"
+        admin = svc.get_by_username(username)
+        if admin:
+            print(f"Admin '{username}' already exists.")
+            return
+        svc.create({
+            "username": username,
+            "password": password,
+            "is_admin": True,
+            "enabled": True,
+            "max_connections": 1,
+        })
+        print(f"Admin created: {username}")
+    finally:
+        db.close()
+
+
+def cmd_stats(args: List[str]) -> None:
+    """Show basic host statistics."""
+    import psutil
+
+    vm = psutil.virtual_memory()
+    du = psutil.disk_usage("/")
+    print("System stats:")
+    print(f"  CPU cores: {psutil.cpu_count()}")
+    print(f"  CPU load: {psutil.cpu_percent(interval=0.5)}%")
+    print(f"  RAM used: {vm.used / (1024**3):.2f} GiB / {vm.total / (1024**3):.2f} GiB ({vm.percent}%)")
+    print(f"  Disk used: {du.used / (1024**3):.2f} GiB / {du.total / (1024**3):.2f} GiB ({du.percent}%)")
+
+
+def cmd_reset_admin(args: List[str]) -> None:
+    """Reset admin password. Usage: cmd:reset-admin [new_password]"""
+    db = get_db()
+    try:
+        from src.domain.user.service import UserService
+
+        svc = UserService(db)
+        admin = svc.get_by_username("admin")
+        if not admin:
+            print("Admin user not found; creating default admin.")
+            svc.create({
+                "username": "admin",
+                "password": args[0] if args else "admin",
+                "is_admin": True,
+                "enabled": True,
+                "max_connections": 1,
+            })
+            print("Admin created.")
+            return
+        new_password = args[0] if args else "admin"
+        svc.update(admin.id, {"password": new_password})
+        print("Admin password reset successfully.")
+    finally:
+        db.close()
+
+
+def cmd_import_epg(args: List[str]) -> None:
+    """Import EPG from XMLTV URL. Usage: cmd:import-epg <url>"""
+    if not args:
+        print("Usage: cmd:import-epg <xmltv_url>")
+        return
+    db = get_db()
+    try:
+        from src.domain.epg.service import EpgService
+
+        svc = EpgService(db)
+        imported = svc.fetch_and_import(args[0])
+        linked = svc.link_channels(db)
+        print(f"Imported {imported} programme(s), linked {linked} channel row(s).")
+    finally:
+        db.close()
+
+
+def cmd_startup(args: List[str]) -> None:
+    """Initialize runtime dirs and baseline app state."""
+    from src.bootstrap import ensure_runtime_dirs
+
+    ensure_runtime_dirs()
+    cmd_migrate([])
+    cmd_create_admin([])
+    print("Startup initialization complete.")
+
+
+def cmd_monitor(args: List[str]) -> None:
+    """Show quick runtime monitor information."""
+    print("== Host Stats ==")
+    cmd_stats([])
+    print("\n== Active Connections ==")
+    cmd_connections([])
+
+
+def cmd_watchdog(args: List[str]) -> None:
+    """Run lightweight watchdog maintenance checks."""
+    print("Running queue and connection maintenance...")
+    cron_queue([])
+    cron_connections([])
+    print("Watchdog pass completed.")
+
+
+# ===========================================================================
 #  COMMANDS REGISTRY
 # ===========================================================================
 
@@ -1541,6 +1757,15 @@ COMMANDS: Dict[str, Any] = {
     "cmd:fingerprint": cmd_fingerprint,
     "cmd:watch": cmd_watch,
     "cmd:archive": cmd_archive,
+    "cmd:migrate": cmd_migrate,
+    "cmd:create-admin": cmd_create_admin,
+    "cmd:stats": cmd_stats,
+    "cmd:reset-admin": cmd_reset_admin,
+    "cmd:import-epg": cmd_import_epg,
+    # XC_VM-style service aliases
+    "startup": cmd_startup,
+    "monitor": cmd_monitor,
+    "watchdog": cmd_watchdog,
     # --- Cron jobs ---
     "cron:queue": cron_queue,
     "cron:connections": cron_connections,
@@ -1552,6 +1777,13 @@ COMMANDS: Dict[str, Any] = {
     "cron:watch": cron_watch,
     "cron:archive": cron_archive,
     "cron:registrations": cron_registrations,
+    # XC_VM-style cron aliases
+    "cron:streams": cron_streams,
+    "cron:users": cron_users,
+    "cron:epg": cron_epg,
+    "cron:cache": cron_cache,
+    "cron:servers": cron_servers,
+    "cron:backups": cron_backups,
 }
 
 
