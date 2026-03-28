@@ -159,3 +159,130 @@ def mass_delete_episodes(
     )
     db.commit()
     return {"affected": count}
+
+
+
+class ExtendUsersRequest(BaseModel):
+    ids: List[int]
+    days: int
+
+
+class ChangeBouquetRequest(BaseModel):
+    ids: List[int]
+    bouquet: str
+
+
+class ChangeServerRequest(BaseModel):
+    ids: List[int]
+    server_id: int
+
+
+class ResetPasswordsRequest(BaseModel):
+    ids: List[int]
+    password: str
+
+
+class MoveCategoryRequest(BaseModel):
+    ids: List[int]
+    category_id: int
+
+
+class ToggleStreamsRequest(BaseModel):
+    ids: List[int]
+    enabled: bool
+
+
+@router.post("/extend-users")
+def mass_extend_users(
+    data: ExtendUsersRequest,
+    db: Session = Depends(get_db),
+    admin: User = Depends(get_current_admin),
+):
+    from datetime import datetime, timedelta
+    users = db.query(User).filter(User.id.in_(data.ids)).all()
+    count = 0
+    for u in users:
+        if u.exp_date:
+            u.exp_date = u.exp_date + timedelta(days=data.days)
+        else:
+            u.exp_date = datetime.utcnow() + timedelta(days=data.days)
+        count += 1
+    db.commit()
+    return {"affected": count}
+
+
+@router.post("/change-bouquet")
+def mass_change_bouquet(
+    data: ChangeBouquetRequest,
+    db: Session = Depends(get_db),
+    admin: User = Depends(get_current_admin),
+):
+    count = (
+        db.query(User)
+        .filter(User.id.in_(data.ids))
+        .update({User.bouquet: data.bouquet}, synchronize_session="fetch")
+    )
+    db.commit()
+    return {"affected": count}
+
+
+@router.post("/change-server")
+def mass_change_server(
+    data: ChangeServerRequest,
+    db: Session = Depends(get_db),
+    admin: User = Depends(get_current_admin),
+):
+    count = (
+        db.query(User)
+        .filter(User.id.in_(data.ids))
+        .update({User.force_server_id: data.server_id}, synchronize_session="fetch")
+    )
+    db.commit()
+    return {"affected": count}
+
+
+@router.post("/reset-passwords")
+def mass_reset_passwords(
+    data: ResetPasswordsRequest,
+    db: Session = Depends(get_db),
+    admin: User = Depends(get_current_admin),
+):
+    from src.core.auth.password import hash_password
+    hashed = hash_password(data.password)
+    count = (
+        db.query(User)
+        .filter(User.id.in_(data.ids))
+        .update({User.password: hashed}, synchronize_session="fetch")
+    )
+    db.commit()
+    return {"affected": count}
+
+
+@router.post("/move-streams-category")
+def mass_move_streams_category(
+    data: MoveCategoryRequest,
+    db: Session = Depends(get_db),
+    admin: User = Depends(get_current_admin),
+):
+    count = (
+        db.query(Stream)
+        .filter(Stream.id.in_(data.ids))
+        .update({Stream.category_id: data.category_id}, synchronize_session="fetch")
+    )
+    db.commit()
+    return {"affected": count}
+
+
+@router.post("/toggle-streams")
+def mass_toggle_streams(
+    data: ToggleStreamsRequest,
+    db: Session = Depends(get_db),
+    admin: User = Depends(get_current_admin),
+):
+    count = (
+        db.query(Stream)
+        .filter(Stream.id.in_(data.ids))
+        .update({Stream.enabled: data.enabled}, synchronize_session="fetch")
+    )
+    db.commit()
+    return {"affected": count}

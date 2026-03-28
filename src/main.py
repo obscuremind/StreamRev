@@ -109,6 +109,25 @@ from src.public.controllers.admin.access_code_routes import router as admin_acce
 from src.public.controllers.admin.mass_routes import router as admin_mass_router
 from src.public.controllers.admin.device_routes import router as admin_device_router
 from src.public.controllers.admin.tools_routes import router as admin_tools_router
+from src.public.controllers.admin.connections_routes import router as admin_connections_router
+from src.public.controllers.admin.queue_routes import router as admin_queue_router
+from src.public.controllers.admin.ondemand_routes import router as admin_ondemand_router
+from src.public.controllers.admin.cache_routes import router as admin_cache_router
+from src.public.controllers.admin.activity_routes import router as admin_activity_router
+from src.public.controllers.admin.audit_routes import router as admin_audit_router
+from src.public.controllers.admin.db_routes import router as admin_db_router
+from src.public.controllers.admin.profile_routes import router as admin_profile_router
+from src.public.controllers.admin.recording_routes import router as admin_recording_router
+from src.public.controllers.admin.rtmp_routes import router as admin_rtmp_router
+from src.public.controllers.admin.session_routes import router as admin_session_router
+from src.public.controllers.admin.hmac_routes import router as admin_hmac_router
+from src.public.controllers.admin.proxy_routes import router as admin_proxy_router
+from src.public.controllers.admin.archive_routes import router as admin_archive_router
+from src.public.controllers.admin.group_routes import router as admin_group_router
+from src.public.controllers.admin.reg_user_routes import router as admin_reg_user_router
+from src.public.controllers.admin.client_log_routes import router as admin_client_log_router
+from src.public.controllers.admin.stream_type_routes import router as admin_stream_type_router
+
 
 app.include_router(admin_auth_router, prefix="/api/admin")
 app.include_router(admin_dashboard_router, prefix="/api/admin")
@@ -132,6 +151,25 @@ app.include_router(admin_access_code_router, prefix="/api/admin")
 app.include_router(admin_mass_router, prefix="/api/admin")
 app.include_router(admin_device_router, prefix="/api/admin")
 app.include_router(admin_tools_router, prefix="/api/admin")
+app.include_router(admin_connections_router, prefix="/api/admin")
+app.include_router(admin_queue_router, prefix="/api/admin")
+app.include_router(admin_ondemand_router, prefix="/api/admin")
+app.include_router(admin_cache_router, prefix="/api/admin")
+app.include_router(admin_activity_router, prefix="/api/admin")
+app.include_router(admin_audit_router, prefix="/api/admin")
+app.include_router(admin_db_router, prefix="/api/admin")
+app.include_router(admin_profile_router, prefix="/api/admin")
+app.include_router(admin_recording_router, prefix="/api/admin")
+app.include_router(admin_rtmp_router, prefix="/api/admin")
+app.include_router(admin_session_router, prefix="/api/admin")
+app.include_router(admin_hmac_router, prefix="/api/admin")
+app.include_router(admin_proxy_router, prefix="/api/admin")
+app.include_router(admin_archive_router, prefix="/api/admin")
+app.include_router(admin_group_router, prefix="/api/admin")
+app.include_router(admin_reg_user_router, prefix="/api/admin")
+app.include_router(admin_client_log_router, prefix="/api/admin")
+app.include_router(admin_stream_type_router, prefix="/api/admin")
+
 
 # --- Player / Xtream Codes Compatible API ---
 from src.public.controllers.api.player_api import router as player_api_router

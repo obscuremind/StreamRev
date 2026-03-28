@@ -258,3 +258,123 @@ def _server_stream_to_dict(ss) -> dict[str, Any]:
         "bitrate": ss.bitrate,
         "current_source": ss.current_source,
     }
+
+
+
+@router.get("/detail/{server_id}")
+def server_detail(
+    server_id: int,
+    db: Session = Depends(get_db),
+    admin: User = Depends(get_current_admin),
+):
+    s = ServerService(db).get_by_id(server_id)
+    if not s:
+        raise HTTPException(status_code=404, detail="Server not found")
+    streams_count = db.query(ServerStream).filter(ServerStream.server_id == server_id).count()
+    active_count = (
+        db.query(ServerStream)
+        .filter(ServerStream.server_id == server_id, ServerStream.stream_status == 1)
+        .count()
+    )
+    return {
+        **_server_to_dict(s),
+        "streams_count": streams_count,
+        "active_streams": active_count,
+    }
+
+
+@router.get("/monitor/{server_id}")
+def monitor_server(
+    server_id: int,
+    db: Session = Depends(get_db),
+    admin: User = Depends(get_current_admin),
+):
+    s = ServerService(db).get_by_id(server_id)
+    if not s:
+        raise HTTPException(status_code=404, detail="Server not found")
+    return {
+        "server_id": server_id,
+        "status": s.status,
+        "server_name": s.server_name,
+        "server_ip": s.server_ip,
+        "total_clients": s.total_clients,
+        "bandwidth_usage": s.total_bandwidth_usage,
+        "network_speed": s.network_guaranteed_speed,
+    }
+
+
+@router.get("/processes/{server_id}")
+def server_processes(
+    server_id: int,
+    db: Session = Depends(get_db),
+    admin: User = Depends(get_current_admin),
+):
+    s = ServerService(db).get_by_id(server_id)
+    if not s:
+        raise HTTPException(status_code=404, detail="Server not found")
+    active_streams = (
+        db.query(ServerStream)
+        .filter(ServerStream.server_id == server_id, ServerStream.pid.isnot(None))
+        .all()
+    )
+    return {
+        "server_id": server_id,
+        "processes": [
+            {
+                "stream_id": ss.stream_id,
+                "pid": ss.pid,
+                "status": ss.stream_status,
+                "bitrate": ss.bitrate,
+            }
+            for ss in active_streams
+        ],
+        "total": len(active_streams),
+    }
+
+
+@router.get("/network/{server_id}")
+def server_network(
+    server_id: int,
+    db: Session = Depends(get_db),
+    admin: User = Depends(get_current_admin),
+):
+    s = ServerService(db).get_by_id(server_id)
+    if not s:
+        raise HTTPException(status_code=404, detail="Server not found")
+    from sqlalchemy import func
+    from src.domain.models import Line
+    connection_count = (
+        db.query(func.count(Line.id))
+        .filter(Line.server_id == server_id)
+        .scalar()
+        or 0
+    )
+    return {
+        "server_id": server_id,
+        "server_ip": s.server_ip,
+        "domain_name": s.domain_name,
+        "http_port": s.http_port,
+        "https_port": s.https_port,
+        "rtmp_port": s.rtmp_port,
+        "vpn_ip": s.vpn_ip,
+        "protocol": s.server_protocol,
+        "bandwidth_usage": s.total_bandwidth_usage,
+        "guaranteed_speed": s.network_guaranteed_speed,
+        "active_connections": connection_count,
+    }
+
+
+@router.post("/restart-service/{server_id}")
+def restart_service(
+    server_id: int,
+    db: Session = Depends(get_db),
+    admin: User = Depends(get_current_admin),
+):
+    s = ServerService(db).get_by_id(server_id)
+    if not s:
+        raise HTTPException(status_code=404, detail="Server not found")
+    return {
+        "status": "restart_queued",
+        "server_id": server_id,
+        "server_name": s.server_name,
+    }

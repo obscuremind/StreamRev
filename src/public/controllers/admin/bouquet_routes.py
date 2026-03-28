@@ -130,3 +130,114 @@ def _parse_id_list(raw: str) -> list[int]:
         return [int(x) for x in data] if isinstance(data, list) else []
     except (json.JSONDecodeError, TypeError, ValueError):
         return []
+
+
+
+class ReorderRequest(BaseModel):
+    order: List[int]
+
+
+class StreamIdsRequest(BaseModel):
+    stream_ids: List[int]
+
+
+class BatchDeleteRequest(BaseModel):
+    ids: List[int]
+
+
+@router.post("/reorder")
+def reorder_bouquets(
+    data: ReorderRequest,
+    db: Session = Depends(get_db),
+    admin: User = Depends(get_current_admin),
+):
+    svc = BouquetService(db)
+    for idx, bouquet_id in enumerate(data.order):
+        b = svc.get_by_id(bouquet_id)
+        if b:
+            b.bouquet_order = idx
+    db.commit()
+    return {"status": "reordered"}
+
+
+@router.post("/{bouquet_id}/reorder-channels")
+def reorder_channels(
+    bouquet_id: int,
+    data: ReorderRequest,
+    db: Session = Depends(get_db),
+    admin: User = Depends(get_current_admin),
+):
+    svc = BouquetService(db)
+    b = svc.get_by_id(bouquet_id)
+    if not b:
+        raise HTTPException(status_code=404, detail="Bouquet not found")
+    svc.update(bouquet_id, {"bouquet_channels": data.order})
+    return {"status": "reordered", "bouquet_id": bouquet_id}
+
+
+@router.post("/{bouquet_id}/add-streams")
+def add_streams_to_bouquet(
+    bouquet_id: int,
+    data: StreamIdsRequest,
+    db: Session = Depends(get_db),
+    admin: User = Depends(get_current_admin),
+):
+    svc = BouquetService(db)
+    b = svc.get_by_id(bouquet_id)
+    if not b:
+        raise HTTPException(status_code=404, detail="Bouquet not found")
+    current = svc.get_channel_ids(b)
+    for sid in data.stream_ids:
+        if sid not in current:
+            current.append(sid)
+    svc.update(bouquet_id, {"bouquet_channels": current})
+    return {"status": "added", "bouquet_id": bouquet_id, "channels": current}
+
+
+@router.post("/{bouquet_id}/remove-streams")
+def remove_streams_from_bouquet(
+    bouquet_id: int,
+    data: StreamIdsRequest,
+    db: Session = Depends(get_db),
+    admin: User = Depends(get_current_admin),
+):
+    svc = BouquetService(db)
+    b = svc.get_by_id(bouquet_id)
+    if not b:
+        raise HTTPException(status_code=404, detail="Bouquet not found")
+    current = svc.get_channel_ids(b)
+    current = [sid for sid in current if sid not in data.stream_ids]
+    svc.update(bouquet_id, {"bouquet_channels": current})
+    return {"status": "removed", "bouquet_id": bouquet_id, "channels": current}
+
+
+@router.get("/{bouquet_id}/channels")
+def get_bouquet_channels(
+    bouquet_id: int,
+    db: Session = Depends(get_db),
+    admin: User = Depends(get_current_admin),
+):
+    svc = BouquetService(db)
+    b = svc.get_by_id(bouquet_id)
+    if not b:
+        raise HTTPException(status_code=404, detail="Bouquet not found")
+    return {
+        "bouquet_id": bouquet_id,
+        "channels": svc.get_channel_ids(b),
+        "movies": svc.get_movie_ids(b),
+        "series": svc.get_series_ids(b),
+    }
+
+
+@router.post("/batch-delete")
+def batch_delete_bouquets(
+    data: BatchDeleteRequest,
+    db: Session = Depends(get_db),
+    admin: User = Depends(get_current_admin),
+):
+    svc = BouquetService(db)
+    count = 0
+    for bid in data.ids:
+        if svc.delete(bid):
+            count += 1
+    return {"status": "deleted", "count": count}

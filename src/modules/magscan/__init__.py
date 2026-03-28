@@ -1,32 +1,31 @@
-"""MAG device scanning module - discovers and manages MAG devices on network."""
+"""MAG device scanner module."""
 from typing import Any
 from src.core.module.loader import ModuleInterface
 from src.core.logging.logger import logger
 
-
-class MagScanner:
-    @staticmethod
-    def parse_mac(mac: str) -> str:
-        return mac.upper().replace("-", ":").strip()
-
-    @staticmethod
-    def validate_mac(mac: str) -> bool:
-        import re
-        return bool(re.match(r'^([0-9A-F]{2}:){5}[0-9A-F]{2}$', mac.upper().replace("-", ":")))
-
-
 class Module(ModuleInterface):
-    def get_name(self) -> str:
-        return "magscan"
-
-    def get_version(self) -> str:
-        return "1.0.0"
-
-    def boot(self, app: Any = None) -> None:
-        logger.info("MAG scanner module loaded")
-
-    def register_routes(self, router: Any = None) -> None:
-        pass
-
-    def get_event_subscribers(self) -> dict:
-        return {}
+    def get_name(self): return "magscan"
+    def get_version(self): return "1.0.0"
+    def boot(self, app: Any = None):
+        from src.modules.magscan.routes import router
+        if app is not None:
+            app.include_router(router)
+        logger.info("MAG Scanner module loaded")
+    def get_event_subscribers(self):
+        return {"mag.device_connected": self.on_device_connected}
+    async def on_device_connected(self, data):
+        from src.core.database import SessionLocal
+        from src.modules.magscan.service import MagScanService
+        if not isinstance(data, dict): return
+        mac = data.get("mac", "")
+        if not mac: return
+        db = SessionLocal()
+        try:
+            svc = MagScanService(db)
+            info = svc.validate_device(mac)
+            if info.get("valid") and not info.get("exists"):
+                logger.info(f"MAGScan: Unknown device: {mac}")
+        except Exception as e:
+            logger.error(f"MAGScan: event error: {e}")
+        finally:
+            db.close()

@@ -1,9 +1,5 @@
-"""
-TMDB (The Movie Database) integration module.
-Fetches metadata for movies and series.
-"""
+"""TMDB metadata integration module."""
 import os
-import json
 from typing import Optional, Dict, Any
 from src.core.module.loader import ModuleInterface
 from src.core.logging.logger import logger
@@ -81,7 +77,6 @@ class TMDBClient:
         videos = tmdb_data.get("videos", {}).get("results", [])
         trailers = [v for v in videos if v.get("type") == "Trailer" and v.get("site") == "YouTube"]
         genres = [g["name"] for g in tmdb_data.get("genres", [])]
-
         return {
             "tmdb_id": tmdb_data.get("id"),
             "plot": tmdb_data.get("overview", ""),
@@ -106,13 +101,43 @@ class Module(ModuleInterface):
         return "1.0.0"
 
     def boot(self, app: Any = None) -> None:
+        from src.modules.tmdb.routes import router
+        if app is not None:
+            app.include_router(router)
         logger.info("TMDB module loaded")
 
     def get_event_subscribers(self) -> dict:
-        return {"movie.created": self.on_movie_created, "series.created": self.on_series_created}
+        return {
+            "movie.created": self.on_movie_created,
+            "series.created": self.on_series_created,
+        }
 
     async def on_movie_created(self, data):
-        logger.info(f"TMDB: Movie created event - {data}")
+        from src.core.database import SessionLocal
+        from src.modules.tmdb.service import TMDBService
+        movie_id = data.get("movie_id") if isinstance(data, dict) else None
+        if not movie_id:
+            return
+        db = SessionLocal()
+        try:
+            svc = TMDBService(db)
+            await svc.search_and_update_movie(movie_id)
+        except Exception as e:
+            logger.error(f"TMDB auto-update movie failed: {e}")
+        finally:
+            db.close()
 
     async def on_series_created(self, data):
-        logger.info(f"TMDB: Series created event - {data}")
+        from src.core.database import SessionLocal
+        from src.modules.tmdb.service import TMDBService
+        series_id = data.get("series_id") if isinstance(data, dict) else None
+        if not series_id:
+            return
+        db = SessionLocal()
+        try:
+            svc = TMDBService(db)
+            await svc.search_and_update_series(series_id)
+        except Exception as e:
+            logger.error(f"TMDB auto-update series failed: {e}")
+        finally:
+            db.close()
