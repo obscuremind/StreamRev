@@ -1,4 +1,6 @@
 """TMDB metadata integration module."""
+MODULE_MANIFEST = {"name": "tmdb", "version": "1.0.0", "compatibility": "streamrev-v1"}
+
 import os
 from typing import Optional, Dict, Any
 from src.core.module.loader import ModuleInterface

@@ -1,4 +1,6 @@
 """Watch folder module."""
+MODULE_MANIFEST = {"name": "watch", "version": "1.0.0", "compatibility": "streamrev-v1"}
+
 import os
 from typing import Any, Dict, List
 from src.core.module.loader import ModuleInterface

@@ -173,6 +173,12 @@ update               Run update/migration wrapper
 | GET | `/hls/{stream_id}/index.m3u8` | HLS playlist |
 | GET | `/hls/{stream_id}/{segment}.ts` | HLS segment |
 
+## Feature Maturity
+
+- **Implemented:** Core admin/player APIs, authentication, base stream delivery, module loading, diagnostics.
+- **Implemented (baseline):** DRM key-provider modes (`off`, `static`, `http`) and orchestrated worker scaffolding (`queue`, `scheduler`, `migrations`).
+- **Partial:** XC_VM service parity, bootstrap semantic parity, and full provisioning/installer equivalence.
+
 ## XC_VM Compatibility
 
 StreamRev now ships XC_VM-aligned runtime directories and entrypoints to simplify migration:
@@ -182,6 +188,8 @@ StreamRev now ships XC_VM-aligned runtime directories and entrypoints to simplif
 - Compatibility entrypoints: `python -m src.bootstrap`, `python -m src.service`, `python -m src.update`
 
 This keeps StreamRev architecture in Python while preserving XC_VM-like operational layout.
+
+**DRM scope note:** `/live/.../key` now supports provider modes `off`, `static`, and `http` via environment configuration.
 
 ## Project Structure
 

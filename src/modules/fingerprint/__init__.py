@@ -1,4 +1,6 @@
 """Client fingerprinting module."""
+MODULE_MANIFEST = {"name": "fingerprint", "version": "1.0.0", "compatibility": "streamrev-v1"}
+
 import hashlib
 from typing import Any
 from src.core.module.loader import ModuleInterface

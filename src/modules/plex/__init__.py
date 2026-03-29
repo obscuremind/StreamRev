@@ -1,4 +1,6 @@
 """Plex integration module."""
+MODULE_MANIFEST = {"name": "plex", "version": "1.0.0", "compatibility": "streamrev-v1"}
+
 from src.core.module.loader import ModuleInterface
 from src.core.logging.logger import logger
 from typing import Any
