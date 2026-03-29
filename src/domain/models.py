@@ -6,6 +6,7 @@ from datetime import datetime
 from typing import List, Optional
 
 from sqlalchemy import (
+    BigInteger,
     Boolean,
     DateTime,
     Float,
@@ -1072,3 +1073,150 @@ class ScheduledRecording(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=_utcnow)
 
     stream: Mapped["Stream"] = relationship("Stream", foreign_keys=[stream_id])
+
+
+class QueueJob(Base):
+    """XC_VM-compatible queue table."""
+
+    __tablename__ = "queue"
+    __table_args__ = (Index("ix_queue_server_id", "server_id"), Index("ix_queue_stream_id", "stream_id"))
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    queue_type: Mapped[Optional[str]] = mapped_column("type", String(32), nullable=True)
+    server_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    stream_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    pid: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    added: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+
+
+class Signal(Base):
+    """XC_VM-compatible process signal/event table."""
+
+    __tablename__ = "signals"
+    __table_args__ = (Index("ix_signals_server_id", "server_id"), Index("ix_signals_time", "time"))
+
+    id: Mapped[int] = mapped_column("signal_id", Integer, primary_key=True, autoincrement=True)
+    pid: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    server_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    rtmp: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    time: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    custom_data: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    cache: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+
+class LoginLog(Base):
+    """XC_VM-compatible auth/login attempts log."""
+
+    __tablename__ = "login_logs"
+    __table_args__ = (
+        Index("ix_login_logs_user_id", "user_id"),
+        Index("ix_login_logs_date", "date"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    log_type: Mapped[Optional[str]] = mapped_column("type", String(50), nullable=True)
+    access_code: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    user_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    status: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    login_ip: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    date: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+
+
+class PanelLog(Base):
+    """XC_VM-compatible panel audit/activity log."""
+
+    __tablename__ = "panel_logs"
+    __table_args__ = (Index("ix_panel_logs_date", "date"), Index("ix_panel_logs_server_id", "server_id"))
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    log_type: Mapped[str] = mapped_column("type", String(50), nullable=False, default="pdo")
+    log_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    log_extra: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    line: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    date: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    server_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    unique_tag: Mapped[Optional[str]] = mapped_column("unique", String(32), nullable=True)
+    file: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    env: Mapped[str] = mapped_column(String(32), nullable=False, default="cli")
+
+
+class StreamServerMap(Base):
+    """XC_VM-compatible stream-to-server mapping state."""
+
+    __tablename__ = "streams_servers"
+    __table_args__ = (Index("ix_streams_servers_stream_id", "stream_id"), Index("ix_streams_servers_server_id", "server_id"))
+
+    id: Mapped[int] = mapped_column("server_stream_id", Integer, primary_key=True, autoincrement=True)
+    stream_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    server_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    parent_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    pid: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    to_analyze: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    stream_status: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    stream_started: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    stream_info: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    monitor_pid: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    aes_pid: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    current_source: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    bitrate: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    progress_info: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    cc_info: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    on_demand: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    delay_pid: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    delay_available_at: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    ondemand_check: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    pids_create_channel: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    cchannel_rsources: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    updated: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True, onupdate=_utcnow)
+    compatible: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    audio_codec: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    video_codec: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    resolution: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+
+
+class StreamStat(Base):
+    """XC_VM-compatible stream stats snapshots."""
+
+    __tablename__ = "streams_stats"
+    __table_args__ = (Index("ix_streams_stats_stream_id", "stream_id"), Index("ix_streams_stats_time", "time"))
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    stream_id: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    rank: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    time: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    connections: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    users: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    stat_type: Mapped[Optional[str]] = mapped_column("type", String(16), nullable=True)
+    dateadded: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=_utcnow)
+
+
+class ServerStat(Base):
+    """XC_VM-compatible server stats snapshots."""
+
+    __tablename__ = "servers_stats"
+    __table_args__ = (Index("ix_servers_stats_server_id", "server_id"), Index("ix_servers_stats_time", "time"))
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    server_id: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    connections: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    streams: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    users: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    cpu: Mapped[float] = mapped_column(Float, nullable=False, default=0)
+    cpu_cores: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    cpu_avg: Mapped[float] = mapped_column(Float, nullable=False, default=0)
+    total_mem: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    total_mem_free: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    total_mem_used: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    total_mem_used_percent: Mapped[float] = mapped_column(Float, nullable=False, default=0)
+    total_disk_space: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    uptime: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    total_running_streams: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    bytes_sent: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    bytes_received: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    bytes_sent_total: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    bytes_received_total: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    cpu_load_average: Mapped[float] = mapped_column(Float, nullable=False, default=0)
+    gpu_info: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    iostat_info: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    time: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    total_users: Mapped[int] = mapped_column(Integer, nullable=False, default=0)

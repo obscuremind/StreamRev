@@ -512,6 +512,122 @@ CREATE TABLE enigma2_actions (
 	FOREIGN KEY(device_id) REFERENCES enigma2_devices (device_id) ON DELETE CASCADE
 );
 
+CREATE TABLE `queue` (
+	id INTEGER NOT NULL AUTO_INCREMENT,
+	`type` VARCHAR(32),
+	server_id INTEGER,
+	stream_id INTEGER,
+	pid INTEGER,
+	added INTEGER,
+	PRIMARY KEY (id)
+);
+
+CREATE TABLE signals (
+	signal_id INTEGER NOT NULL AUTO_INCREMENT,
+	pid INTEGER,
+	server_id INTEGER,
+	rtmp INTEGER NOT NULL DEFAULT 0,
+	`time` INTEGER,
+	custom_data TEXT,
+	cache INTEGER NOT NULL DEFAULT 0,
+	PRIMARY KEY (signal_id)
+);
+
+CREATE TABLE login_logs (
+	id INTEGER NOT NULL AUTO_INCREMENT,
+	`type` VARCHAR(50),
+	access_code INTEGER,
+	user_id INTEGER,
+	status VARCHAR(50),
+	login_ip VARCHAR(255),
+	`date` INTEGER,
+	PRIMARY KEY (id)
+);
+
+CREATE TABLE panel_logs (
+	id INTEGER NOT NULL AUTO_INCREMENT,
+	`type` VARCHAR(50) NOT NULL DEFAULT 'pdo',
+	log_message LONGTEXT,
+	log_extra LONGTEXT,
+	`line` INTEGER,
+	`date` INTEGER,
+	server_id INTEGER,
+	`unique` VARCHAR(32),
+	`file` VARCHAR(255),
+	env VARCHAR(32) NOT NULL DEFAULT 'cli',
+	PRIMARY KEY (id)
+);
+
+CREATE TABLE streams_servers (
+	server_stream_id INTEGER NOT NULL AUTO_INCREMENT,
+	stream_id INTEGER,
+	server_id INTEGER,
+	parent_id INTEGER,
+	pid INTEGER,
+	to_analyze INTEGER NOT NULL DEFAULT 0,
+	stream_status INTEGER NOT NULL DEFAULT 0,
+	stream_started INTEGER,
+	stream_info TEXT,
+	monitor_pid INTEGER,
+	aes_pid INTEGER,
+	current_source TEXT,
+	bitrate INTEGER,
+	progress_info TEXT,
+	cc_info TEXT,
+	on_demand BOOL NOT NULL DEFAULT 0,
+	delay_pid INTEGER,
+	delay_available_at INTEGER,
+	ondemand_check INTEGER,
+	pids_create_channel TEXT,
+	cchannel_rsources TEXT,
+	updated DATETIME,
+	compatible BOOL NOT NULL DEFAULT 0,
+	audio_codec VARCHAR(64),
+	video_codec VARCHAR(64),
+	resolution INTEGER,
+	PRIMARY KEY (server_stream_id)
+);
+
+CREATE TABLE streams_stats (
+	id INTEGER NOT NULL AUTO_INCREMENT,
+	stream_id INTEGER NOT NULL DEFAULT 0,
+	`rank` INTEGER NOT NULL DEFAULT 0,
+	`time` INTEGER NOT NULL DEFAULT 0,
+	connections INTEGER NOT NULL DEFAULT 0,
+	users INTEGER NOT NULL DEFAULT 0,
+	`type` VARCHAR(16),
+	dateadded DATETIME NOT NULL,
+	PRIMARY KEY (id)
+);
+
+CREATE TABLE servers_stats (
+	id INTEGER NOT NULL AUTO_INCREMENT,
+	server_id INTEGER NOT NULL DEFAULT 0,
+	connections INTEGER NOT NULL DEFAULT 0,
+	streams INTEGER NOT NULL DEFAULT 0,
+	users INTEGER NOT NULL DEFAULT 0,
+	cpu FLOAT NOT NULL DEFAULT 0,
+	cpu_cores INTEGER NOT NULL DEFAULT 0,
+	cpu_avg FLOAT NOT NULL DEFAULT 0,
+	total_mem INTEGER NOT NULL DEFAULT 0,
+	total_mem_free INTEGER NOT NULL DEFAULT 0,
+	total_mem_used INTEGER NOT NULL DEFAULT 0,
+	total_mem_used_percent FLOAT NOT NULL DEFAULT 0,
+	total_disk_space BIGINT NOT NULL DEFAULT 0,
+	uptime VARCHAR(255),
+	total_running_streams INTEGER NOT NULL DEFAULT 0,
+	bytes_sent BIGINT NOT NULL DEFAULT 0,
+	bytes_received BIGINT NOT NULL DEFAULT 0,
+	bytes_sent_total BIGINT NOT NULL DEFAULT 0,
+	bytes_received_total BIGINT NOT NULL DEFAULT 0,
+	cpu_load_average FLOAT NOT NULL DEFAULT 0,
+	gpu_info TEXT,
+	iostat_info TEXT,
+	`time` INTEGER NOT NULL DEFAULT 0,
+	total_users INTEGER NOT NULL DEFAULT 0,
+	PRIMARY KEY (id)
+);
+
 
 -- ---------------------------------------------------------------------------
 -- INDEXES
@@ -599,6 +715,20 @@ CREATE INDEX ix_user_activity_date_start ON user_activity (date_start);
 CREATE INDEX ix_user_activity_stream_id ON user_activity (stream_id);
 
 CREATE INDEX ix_enigma2_actions_device_id ON enigma2_actions (device_id);
+CREATE INDEX ix_queue_server_id ON `queue` (server_id);
+CREATE INDEX ix_queue_stream_id ON `queue` (stream_id);
+CREATE INDEX ix_signals_server_id ON signals (server_id);
+CREATE INDEX ix_signals_time ON signals (`time`);
+CREATE INDEX ix_login_logs_user_id ON login_logs (user_id);
+CREATE INDEX ix_login_logs_date ON login_logs (`date`);
+CREATE INDEX ix_panel_logs_date ON panel_logs (`date`);
+CREATE INDEX ix_panel_logs_server_id ON panel_logs (server_id);
+CREATE INDEX ix_streams_servers_stream_id ON streams_servers (stream_id);
+CREATE INDEX ix_streams_servers_server_id ON streams_servers (server_id);
+CREATE INDEX ix_streams_stats_stream_id ON streams_stats (stream_id);
+CREATE INDEX ix_streams_stats_time ON streams_stats (`time`);
+CREATE INDEX ix_servers_stats_server_id ON servers_stats (server_id);
+CREATE INDEX ix_servers_stats_time ON servers_stats (`time`);
 
 
 SET FOREIGN_KEY_CHECKS = 1;

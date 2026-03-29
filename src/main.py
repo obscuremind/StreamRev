@@ -186,7 +186,9 @@ app.include_router(web_player_router)
 
 # --- Reseller API ---
 from src.public.controllers.reseller.reseller_api import router as reseller_api_router
+from src.public.controllers.reseller.reseller_routes import router as reseller_web_router
 app.include_router(reseller_api_router, prefix="/api/reseller")
+app.include_router(reseller_web_router)
 
 # --- Streaming Routes ---
 from src.public.controllers.api.streaming_routes import router as streaming_router

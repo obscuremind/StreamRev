@@ -1734,6 +1734,46 @@ def cmd_watchdog(args: List[str]) -> None:
     print("Watchdog pass completed.")
 
 
+def cmd_parity_check(args: List[str]) -> None:
+    """
+    Validate P0 XC_VM parity contract (route and schema table presence).
+    Usage: cmd:parity-check
+    """
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[2]
+    failures: List[str] = []
+
+    reseller_text = (root / "src/public/controllers/reseller/reseller_routes.py").read_text(encoding="utf-8")
+    player_text = (root / "src/public/controllers/player/player_routes.py").read_text(encoding="utf-8")
+    schema_text = (root / "schema.sql").read_text(encoding="utf-8")
+    matrix_path = root / "parity/p0_matrix.json"
+    matrix = json.loads(matrix_path.read_text(encoding="utf-8"))
+    reseller_required = matrix["checks"]["route_level"]["reseller"]
+    player_required = matrix["checks"]["route_level"]["player"]
+    table_required = matrix["checks"]["db_table_level"]
+
+    for path in reseller_required:
+        if f'"/{path}"' not in reseller_text:
+            failures.append(f"missing reseller route: /reseller/{path}")
+    for path in player_required:
+        if f'"/{path}"' not in player_text:
+            failures.append(f"missing player route: /player/{path}")
+    schema_l = schema_text.lower()
+    for table in table_required:
+        if f"create table {table} (" not in schema_l and f"create table `{table}` (" not in schema_l:
+            failures.append(f"missing schema table: {table}")
+
+    if failures:
+        print("XC_VM P0 parity check: FAILED")
+        for item in failures:
+            print(f" - {item}")
+        raise SystemExit(1)
+
+    print("XC_VM P0 parity check: OK")
+    logger.info("cmd:parity-check — all P0 route/schema checks passed")
+
+
 # ===========================================================================
 #  COMMANDS REGISTRY
 # ===========================================================================
@@ -1766,6 +1806,7 @@ COMMANDS: Dict[str, Any] = {
     "startup": cmd_startup,
     "monitor": cmd_monitor,
     "watchdog": cmd_watchdog,
+    "cmd:parity-check": cmd_parity_check,
     # --- Cron jobs ---
     "cron:queue": cron_queue,
     "cron:connections": cron_connections,

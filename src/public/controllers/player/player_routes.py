@@ -2,8 +2,8 @@
 
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
-from fastapi.responses import HTMLResponse
+from fastapi import APIRouter, Depends, Form, HTTPException, Query
+from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy.orm import Session
 
 from src.core.config import settings
@@ -46,6 +46,17 @@ h2{text-align:center;color:#e94560}</style></head><body>
     )
 
 
+@router.post("/login")
+def player_login_submit(
+    username: str = Form(...),
+    password: str = Form(...),
+    db: Session = Depends(get_db),
+):
+    """XC_VM compatibility POST login route."""
+    _auth_player(username, password, db)
+    return RedirectResponse(url=f"/player/index?username={username}&password={password}", status_code=302)
+
+
 @router.get("/home")
 def player_home(username: str = Query(...), password: str = Query(...), db: Session = Depends(get_db)):
     user = _auth_player(username, password, db)
@@ -63,6 +74,12 @@ def player_home(username: str = Query(...), password: str = Query(...), db: Sess
         "movie_categories": [{"id": c.id, "name": c.category_name} for c in movie_cats],
         "series_categories": [{"id": c.id, "name": c.category_name} for c in series_cats],
     }
+
+
+@router.get("/index")
+def player_index(username: str = Query(...), password: str = Query(...), db: Session = Depends(get_db)):
+    """XC_VM compatibility alias for player home/index."""
+    return player_home(username=username, password=password, db=db)
 
 
 @router.get("/live")
@@ -112,6 +129,30 @@ def player_movies(
     ]
 
 
+@router.get("/movie")
+def player_movie(
+    movie_id: int = Query(...),
+    username: str = Query(...),
+    password: str = Query(...),
+    db: Session = Depends(get_db),
+):
+    """XC_VM compatibility endpoint for single movie details."""
+    _auth_player(username, password, db)
+    movie = MovieService(db).get_by_id(movie_id)
+    if not movie:
+        raise HTTPException(status_code=404, detail="Movie not found")
+    base = f"{settings.SERVER_PROTOCOL}://{settings.SERVER_HOST}:{settings.SERVER_PORT}"
+    return {
+        "id": movie.id,
+        "name": movie.stream_display_name,
+        "icon": movie.stream_icon,
+        "plot": movie.plot,
+        "rating": movie.rating,
+        "genre": movie.genre,
+        "url": f"{base}/movie/{username}/{password}/{movie.id}.{movie.container_extension or 'mp4'}",
+    }
+
+
 @router.get("/series")
 def player_series(
     username: str = Query(...),
@@ -158,6 +199,17 @@ def player_episodes(
     ]
 
 
+@router.get("/episodes")
+def player_episodes_alias(
+    series_id: int = Query(...),
+    username: str = Query(...),
+    password: str = Query(...),
+    db: Session = Depends(get_db),
+):
+    """XC_VM compatibility alias for episode listing endpoint."""
+    return player_episodes(series_id=series_id, username=username, password=password, db=db)
+
+
 @router.get("/profile")
 def player_profile(username: str = Query(...), password: str = Query(...), db: Session = Depends(get_db)):
     user = _auth_player(username, password, db)
@@ -170,3 +222,46 @@ def player_profile(username: str = Query(...), password: str = Query(...), db: S
         "active_connections": svc.get_active_connections(user.id),
         "created_at": str(user.created_at) if user.created_at else None,
     }
+
+
+@router.get("/listings")
+def player_listings(username: str = Query(...), password: str = Query(...), db: Session = Depends(get_db)):
+    """XC_VM-compatible listing summary endpoint for player panel."""
+    _auth_player(username, password, db)
+    return {
+        "live": player_live(username=username, password=password, db=db),
+        "movies": player_movies(username=username, password=password, db=db),
+        "series": player_series(username=username, password=password, db=db),
+    }
+
+
+@router.get("/logout")
+def player_logout():
+    """XC_VM-compatible logout endpoint for player scope."""
+    return {
+        "status": "ok",
+        "message": "Logged out. Remove client-side cached credentials/session.",
+    }
+
+
+@router.get("/proxy")
+def player_proxy(
+    target: str = Query(..., description="Absolute media URL"),
+    username: str = Query(...),
+    password: str = Query(...),
+    db: Session = Depends(get_db),
+):
+    """XC_VM-compatible proxy endpoint using redirect semantics."""
+    _auth_player(username, password, db)
+    return RedirectResponse(url=target, status_code=307)
+
+
+@router.get("/resize")
+def player_resize(
+    username: str = Query(...),
+    password: str = Query(...),
+    db: Session = Depends(get_db),
+):
+    """XC_VM compatibility endpoint used by legacy player clients."""
+    _auth_player(username, password, db)
+    return {"status": "ok", "mode": "resize", "width": 1920, "height": 1080}
