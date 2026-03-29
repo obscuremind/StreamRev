@@ -1,0 +1,25 @@
+{
+  "scope": "XC_VM P0",
+  "updated": "2026-03-29",
+  "checks": {
+    "route_level": {
+      "reseller": [
+        "dashboard","edit_profile","logout","session","login","index","post","api","table","resize",
+        "lines","line","line_activity","live_connections","mags","mag","enigmas","enigma",
+        "streams","movies","radios","episodes","created_channels","epg_view",
+        "tickets","ticket","ticket_view","users","user","user_logs"
+      ],
+      "player": [
+        "index","live","movies","movie","series","episodes","profile","logout","listings","login","proxy","resize"
+      ]
+    },
+    "db_table_level": [
+      "queue","signals","login_logs","panel_logs","streams_servers","streams_stats","servers_stats"
+    ],
+    "workflow_level": [
+      "reseller_dashboard_users_lines_tickets_profile_session_logout",
+      "player_login_logout_listings_live_movies_series_episodes_profile",
+      "compat_route_map_enabled"
+    ]
+  }
+}
