@@ -24,6 +24,7 @@ from src.streaming.delivery.hls_handler import hls_handler
 from src.streaming.delivery.off_air_handler import off_air_handler
 from src.streaming.engine import streaming_engine
 from src.streaming.protection.connection_limiter import connection_limiter
+from src.streaming.drm import drm_provider, DRMProviderError
 
 router = APIRouter(tags=["Streaming"])
 logger = logging.getLogger(__name__)
@@ -278,7 +279,7 @@ async def live_thumb(
 
 
 @router.get("/live/{username}/{password}/{stream_id_ext}/key")
-async def live_drm_key_placeholder(
+async def live_drm_key(
     username: str,
     password: str,
     stream_id_ext: str,
@@ -307,16 +308,18 @@ async def live_drm_key_placeholder(
     conn_id = f"{user.id}_{stream_id}_{client_ip}"
     connection_limiter.add_connection(user.id, conn_id)
     try:
+        try:
+            keys = await drm_provider.get_keys(stream_id=stream_id, username=user.username)
+        except DRMProviderError as exc:
+            raise HTTPException(status_code=502, detail=f"DRM provider error: {exc}")
+
         payload = {
             "stream_id": stream_id,
             "scheme": "clearkey",
-            "keys": [],
-            "message": "DRM key slot reserved; this build serves clear streams only.",
+            "keys": [{"kid": k.kid, "key": k.key} for k in keys],
+            "message": "ok" if keys else "No DRM keys for this stream.",
         }
-        return Response(
-            content=json.dumps(payload),
-            media_type="application/json",
-        )
+        return Response(content=json.dumps(payload), media_type="application/json")
     finally:
         connection_limiter.remove_connection(user.id, conn_id)
 

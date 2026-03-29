@@ -56,6 +56,13 @@ class Settings(BaseSettings):
     # HMAC stream token validation (skew window around expiry epoch)
     STREAMING_HMAC_MAX_SKEW_SECONDS: int = 300
 
+    # DRM provider
+    DRM_PROVIDER_MODE: str = "off"  # off | static | http
+    DRM_PROVIDER_URL: str = ""
+    DRM_PROVIDER_TOKEN: str = ""
+    DRM_PROVIDER_TIMEOUT_SECONDS: int = 5
+    DRM_STATIC_KEYS_JSON: str = ""
+
     # Nginx
     NGINX_BIN: str = "/usr/sbin/nginx"
     NGINX_CONF_DIR: str = ""

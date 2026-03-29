@@ -1,22 +1,19 @@
-"""XC_VM-compatible bootstrap helpers for StreamRev.
-
-This module centralizes runtime directory preparation and environment bootstrapping
-similarly to XC_VM's bootstrap entrypoint.
-"""
+"""XC_VM-compatible bootstrap helpers for StreamRev."""
 from __future__ import annotations
 
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable
+from typing import Iterable, Literal
 
 from src.core.config import settings
+from src.core.logging.logger import logger
+
+BootstrapContext = Literal["minimal", "cli", "stream", "admin", "service"]
 
 
 @dataclass(frozen=True)
 class RuntimePaths:
-    """Resolved runtime paths used across service/update/streaming flows."""
-
     base: Path
     content: Path
     backups: Path
@@ -53,15 +50,31 @@ def resolve_runtime_paths() -> RuntimePaths:
     )
 
 
-def ensure_runtime_dirs() -> RuntimePaths:
+def _apply_context(paths: RuntimePaths, context: BootstrapContext) -> None:
+    if context in {"admin", "service"}:
+        os.makedirs(paths.base / "www", exist_ok=True)
+
+    if context in {"stream", "service"}:
+        os.makedirs(paths.content / "streams", exist_ok=True)
+        if not os.path.exists(settings.FFMPEG_PATH):
+            logger.warning("FFmpeg not found at configured path: %s", settings.FFMPEG_PATH)
+
+    if context == "cli":
+        os.environ["STREAMREV_CONTEXT"] = "cli"
+
+
+def ensure_runtime_dirs(context: BootstrapContext = "minimal") -> RuntimePaths:
     paths = resolve_runtime_paths()
     for rel in _required_subdirs():
         os.makedirs(paths.base / rel, exist_ok=True)
+
+    _apply_context(paths, context)
+    logger.info("Bootstrap context initialized: %s", context)
     return paths
 
 
 def main() -> int:
-    paths = ensure_runtime_dirs()
+    paths = ensure_runtime_dirs(context="cli")
     print(f"Runtime prepared under: {paths.base}")
     return 0
 

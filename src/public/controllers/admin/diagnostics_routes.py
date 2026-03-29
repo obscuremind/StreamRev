@@ -5,6 +5,7 @@ import subprocess
 import psutil
 from fastapi import APIRouter, Depends
 from src.domain.models import User
+from src.core.config import settings
 from src.streaming.engine import streaming_engine
 
 from .dependencies import get_current_admin

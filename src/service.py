@@ -1,91 +1,56 @@
-"""XC_VM-like service command wrapper for StreamRev.
-
-Usage:
-  PYTHONPATH=$(pwd) python -m src.service start
-  PYTHONPATH=$(pwd) python -m src.service status
-"""
+"""XC_VM-like service command wrapper for StreamRev."""
 from __future__ import annotations
 
 import argparse
-import signal
-import subprocess
-import sys
-from pathlib import Path
 
 from src.bootstrap import ensure_runtime_dirs
-from src.core.config import settings
-
-PID_FILE = Path(settings.BASE_DIR) / "tmp" / "streamrev.pid"
-
-
-def _is_running(pid: int) -> bool:
-    try:
-        Path(f"/proc/{pid}").exists() or __import__("os").kill(pid, 0)
-        return True
-    except Exception:
-        return False
+from src.core.process.orchestrator import orchestrator
 
 
 def start() -> int:
-    ensure_runtime_dirs()
-    if PID_FILE.exists():
-        try:
-            pid = int(PID_FILE.read_text().strip())
-            if _is_running(pid):
-                print(f"streamrev already running (pid={pid})")
-                return 0
-        except ValueError:
-            pass
-
-    cmd = [
-        sys.executable,
-        "-m",
-        "uvicorn",
-        "src.main:app",
-        "--host",
-        settings.SERVER_HOST,
-        "--port",
-        str(settings.SERVER_PORT),
-        "--workers",
-        "4",
-    ]
-    proc = subprocess.Popen(cmd, cwd=str(Path(settings.BASE_DIR).parent))
-    PID_FILE.write_text(str(proc.pid))
-    print(f"streamrev started (pid={proc.pid})")
-    return 0
+    ensure_runtime_dirs(context="service")
+    return orchestrator.start_all()
 
 
 def stop() -> int:
-    if not PID_FILE.exists():
-        print("streamrev is not running (no pid file)")
-        return 0
-
-    pid = int(PID_FILE.read_text().strip())
-    try:
-        __import__("os").kill(pid, signal.SIGTERM)
-        print(f"stopped streamrev (pid={pid})")
-    except ProcessLookupError:
-        print(f"process {pid} not found; cleaning stale pid file")
-    PID_FILE.unlink(missing_ok=True)
-    return 0
+    return orchestrator.stop_all()
 
 
 def status() -> int:
-    if not PID_FILE.exists():
+    status_map = orchestrator.status()
+    if not status_map:
         print("streamrev status: stopped")
         return 1
 
-    try:
-        pid = int(PID_FILE.read_text().strip())
-    except ValueError:
-        print("streamrev status: invalid pid file")
+    running = [name for name, meta in status_map.items() if meta["running"]]
+    critical_down = [
+        name for name, meta in status_map.items() if (not meta["running"] and meta.get("critical", True))
+    ]
+
+    for name, meta in status_map.items():
+        state = "running" if meta["running"] else "stopped"
+        crit = "critical" if meta.get("critical", True) else "optional"
+        print(f"{name}: {state} ({crit}, pid={meta['pid']})")
+
+    if critical_down:
+        print(f"streamrev status: degraded (critical down: {', '.join(critical_down)})")
         return 2
 
-    if _is_running(pid):
-        print(f"streamrev status: running (pid={pid})")
+    if running:
+        print(f"streamrev status: running ({len(running)}/{len(status_map)} services)")
         return 0
-    print("streamrev status: stopped (stale pid file)")
+
+    print("streamrev status: stopped")
     return 1
+
+
+def heal() -> int:
+    result = orchestrator.reconcile()
+    if result["restarted"]:
+        print("restarted critical services:", ", ".join(result["restarted"]))
+    else:
+        print("all critical services healthy")
+    return 0
 
 
 def restart() -> int:
@@ -95,9 +60,15 @@ def restart() -> int:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="StreamRev service command wrapper")
-    parser.add_argument("command", choices=["start", "stop", "restart", "status"])
+    parser.add_argument("command", choices=["start", "stop", "restart", "status", "heal"])
     args = parser.parse_args()
-    return {"start": start, "stop": stop, "restart": restart, "status": status}[args.command]()
+    return {
+        "start": start,
+        "stop": stop,
+        "restart": restart,
+        "status": status,
+        "heal": heal,
+    }[args.command]()
 
 
 if __name__ == "__main__":
